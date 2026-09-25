@@ -15,8 +15,40 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Sign in through Auth in the browser, or with a device code, and store the sign-in.
+    Login(LoginArgs),
+
+    /// End the stored sign-in at Auth and forget it. COMPLIANCE_TOKEN is not touched.
+    Logout,
+
+    /// Show the host, the credential in use, the User, and the Account commands act in.
+    Status,
+
+    /// List the User's Accounts, or move the credential to another one.
+    #[command(subcommand)]
+    Accounts(AccountsCommand),
+
     /// Make one raw call to the REST API with the current credential.
     Api(ApiArgs),
+}
+
+#[derive(Args)]
+pub struct LoginArgs {
+    /// Sign in with a code on another device instead of a browser on this one.
+    #[arg(long)]
+    pub device: bool,
+}
+
+#[derive(Subcommand)]
+pub enum AccountsCommand {
+    /// List every Account the User belongs to, the current one marked.
+    List,
+
+    /// Move the credential into another Account, for every later command.
+    Switch {
+        /// The Account id, from `compliance accounts list`.
+        id: u64,
+    },
 }
 
 #[derive(Args)]

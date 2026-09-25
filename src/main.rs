@@ -1,10 +1,18 @@
+mod accounts;
 mod api;
 mod cli;
 mod config;
+mod credential;
+mod discovery;
 mod failure;
 mod http;
+mod login;
+mod logout;
+mod oauth;
 mod output;
 mod response;
+mod status;
+mod store;
 
 use std::process::ExitCode;
 
@@ -21,6 +29,10 @@ fn main() -> ExitCode {
     };
 
     let result = match cli.command {
+        Command::Login(args) => login::run(args),
+        Command::Logout => logout::run(),
+        Command::Status => status::run(),
+        Command::Accounts(command) => accounts::run(command),
         Command::Api(args) => api::run(args),
     };
 

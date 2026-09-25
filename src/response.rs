@@ -58,14 +58,27 @@ pub fn print_response(response: Response<ureq::Body>, out: Option<&Path>) -> Res
     if bytes.is_empty() {
         return print_empty_success(status);
     }
-    let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
-        Failure::local(
-            "invalid-response",
-            format!("The response claims JSON but does not parse: {error}"),
-        )
-    })?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(invalid_json)?;
     output::print_json(&value);
     Ok(())
+}
+
+/// The JSON body of a success, or the failure `print_response` would report for an error.
+pub fn read_json(response: Response<ureq::Body>) -> Result<Value, Failure> {
+    let status = response.status().as_u16();
+    let content_type = header_text(&response, header::CONTENT_TYPE);
+    let bytes = read_all(&mut response.into_body().into_reader())?;
+    if status >= 400 {
+        return Err(problem(status, content_type.as_deref(), bytes));
+    }
+    serde_json::from_slice(&bytes).map_err(invalid_json)
+}
+
+fn invalid_json(error: serde_json::Error) -> Failure {
+    Failure::local(
+        "invalid-response",
+        format!("The response claims JSON but does not parse: {error}"),
+    )
 }
 
 fn print_empty_success(status: u16) -> Result<(), Failure> {

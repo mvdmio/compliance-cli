@@ -15,12 +15,18 @@ CI runs format, lint, and test on Linux, macOS, and Windows for every push and p
 
 - `src/main.rs`: argument parsing and the exit-code mapping.
 - `src/cli.rs`: the command line.
-- `src/config.rs`: the host and the credential.
-- `src/http.rs`: the HTTP client (User-Agent, bearer, 429 retry).
+- `src/config.rs`: the host.
+- `src/credential.rs`: the credential in use (`COMPLIANCE_TOKEN`, else the stored sign-in) and its refresh.
+- `src/store.rs`: the stored sign-in file (`credentials.json`, one entry per host, mode 0600 on Unix).
+- `src/discovery.rs`: finds Auth through the Protected Resource Metadata.
+- `src/oauth.rs`: token, device, and revocation requests, and PKCE.
+- `src/http.rs`: the HTTP client (User-Agent, bearer, 429 retry, refresh before expiry and on a 401).
 - `src/response.rs`: turns an API answer into output.
 - `src/failure.rs`, `src/output.rs`: errors, exit codes, and JSON printing.
-- `src/api.rs`: `compliance api`.
-- `tests/`: tests that run the built binary against an in-process fake server (`tests/support`).
+- `src/login.rs`, `src/logout.rs`, `src/status.rs`, `src/accounts.rs`, `src/api.rs`: the commands.
+- `tests/`: tests that run the built binary against in-process fake Compliance and Auth hosts (`tests/support`).
+  The tests never open a real browser: they run without a display, and the browser test on Linux puts a fake
+  `xdg-open` first on `PATH`.
 
 ## Rules
 

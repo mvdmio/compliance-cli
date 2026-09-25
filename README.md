@@ -24,13 +24,79 @@ Run the install line again to upgrade. `compliance --version` shows the build yo
 
 ## Sign in
 
-Set `COMPLIANCE_TOKEN` to a Personal token. You create Personal tokens on the API & Agent Access page of your
-account; the CLI never creates them.
+```sh
+compliance login
+```
+
+`login` opens your browser at Auth. Sign in there and allow the CLI; the terminal then prints
+`{"status":"logged_in","host":…,"user":{"name":…,"email":…},"account":{…}}`. While it waits, stderr holds
+`{"status":"browser_opened","authorizeUrl":…}`, so you can open the link by hand. It gives up after 5 minutes.
+
+On a machine without a browser, such as a server over SSH, use the device code. `login` falls back to it by
+itself when it cannot open a browser.
+
+```sh
+compliance login --device
+```
+
+stderr then holds `{"status":"device_code","verificationUriComplete":…,"verificationUri":…,"userCode":…,"expiresIn":…}`.
+Open the link on any device and sign in there. The CLI waits until you have.
+
+The CLI finds Auth by itself, through the host's Protected Resource Metadata. You only ever set the Compliance
+host.
+
+A sign-in is an Agent connection: it acts as you, in one of your Accounts at a time. The CLI renews its access
+token by itself. When the connection has ended, commands fail with `not-signed-in`; run `compliance login` again.
+
+```sh
+compliance logout
+```
+
+`logout` ends the Agent connection at Auth, so it stops working everywhere, and then forgets the sign-in. If Auth
+cannot be reached, the sign-in stays, and you can run `logout` again.
+
+### Stored sign-in
+
+The sign-in is stored in `credentials.json`, in the `compliance` folder of your config folder:
+
+| OS | Folder |
+| -- | ------ |
+| Linux | `$XDG_CONFIG_HOME/compliance` or `~/.config/compliance` |
+| macOS | `~/Library/Application Support/compliance` |
+| Windows | `%APPDATA%\compliance` |
+
+`COMPLIANCE_CONFIG_DIR` sets another folder. The file holds one sign-in per host, so a sign-in on another host
+sits beside it. On Linux and macOS, only you can read it (mode 0600).
+
+### Personal token
+
+For unattended jobs, such as CI, set `COMPLIANCE_TOKEN` to a Personal token. You create Personal tokens on the API
+& Agent Access page of your account; the CLI never creates them. `COMPLIANCE_TOKEN` always wins over the stored
+sign-in, and `logout` leaves it alone.
 
 ```sh
 export COMPLIANCE_TOKEN=...
 compliance api GET /api/v1/risks
 ```
+
+## Status and Accounts
+
+```sh
+compliance status
+```
+
+`status` shows who you are and where commands land:
+`{"host":…,"signedIn":…,"credential":{"kind":…,"source":…},"user":…,"account":…,"accounts":[…]}`. The credential
+kind is `personal-token` or `agent-connection`, and the source is `COMPLIANCE_TOKEN` or `stored sign-in`. Without
+a credential it prints `"signedIn": false` and exits 0.
+
+```sh
+compliance accounts list
+compliance accounts switch 42
+```
+
+`accounts list` lists your Accounts, the current one marked `"current": true`. `accounts switch <id>` moves the
+credential into another Account, for every later command and for everyone who uses that credential.
 
 ## Raw calls
 
@@ -72,8 +138,9 @@ person; the CLI never opens a browser for it.
 
 | Variable | Meaning |
 | -------- | ------- |
-| `COMPLIANCE_TOKEN` | A Personal token, sent as the bearer. |
+| `COMPLIANCE_TOKEN` | A Personal token, sent as the bearer. Wins over the stored sign-in. |
 | `COMPLIANCE_URL` | The Compliance host. Defaults to `https://compliance.mvdm.io`. |
+| `COMPLIANCE_CONFIG_DIR` | The folder for the stored sign-in. |
 
 ## Licence
 

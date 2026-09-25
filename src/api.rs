@@ -6,6 +6,7 @@ use ureq::http::uri::PathAndQuery;
 
 use crate::cli::ApiArgs;
 use crate::config;
+use crate::credential;
 use crate::failure::Failure;
 use crate::http::Client;
 use crate::response;
@@ -21,7 +22,8 @@ pub fn run(args: ApiArgs) -> Result<(), Failure> {
     }
     let body = args.body.as_deref().map(json_body).transpose()?;
 
-    let client = Client::new(config::host(), config::credential()?);
+    let host = config::host();
+    let mut client = Client::new(host.clone(), credential::require(&host)?);
     let answer = client.send(&method, &args.path, body.as_deref())?;
     response::print_response(answer, args.out.as_deref())
 }
