@@ -182,52 +182,46 @@ struct Sender<'a> {
 
 impl Sender<'_> {
     fn send(&mut self) -> Result<(), Failure> {
-        let mut whole = self.source.length <= self.link.part_size;
-        let mut offset = 0;
+        let length = self.source.length;
+        // `None` sends the whole file in one `PUT`. `Some(offset)` sends the part at `offset`, or finishes once
+        // `offset` is the file's length. Every request that does not end the upload leaves `Some`, so the rest goes
+        // as parts.
+        let mut offset = (length > self.link.part_size).then_some(0);
         let mut stalled = 0;
         loop {
-            let before = offset;
-            let answer = if whole {
-                self.put(None)?
-            } else if offset < self.source.length {
-                self.put(Some(offset))?
-            } else {
-                self.finish()?
+            let before = offset.unwrap_or(0);
+            let answer = match offset {
+                Some(offset) if offset == length => self.finish()?,
+                offset => self.put(offset)?,
             };
-            let accepted = matches!(answer, Answer::Accepted(_));
             let received = match answer {
-                Answer::Accepted(_) if whole || offset == self.source.length => return Ok(()),
-                Answer::Accepted(status) => Some(status.map_or_else(
-                    || offset + self.part_length(offset),
+                Answer::Accepted(_) if offset.is_none_or(|offset| offset == length) => {
+                    return Ok(());
+                }
+                Answer::Accepted(status) => status.map_or_else(
+                    || before + self.part_length(before),
                     |status| status.bytes_received,
-                )),
-                Answer::Holds(received) => Some(received),
+                ),
+                Answer::Holds(received) => received,
                 Answer::Lost => match self.status()? {
                     Some(status) if status.finished => return Ok(()),
-                    Some(status) => Some(status.bytes_received),
-                    None => None,
+                    Some(status) => status.bytes_received,
+                    None => before,
                 },
             };
-            if !accepted {
-                whole = false;
+            if received > length {
+                return Err(self.failure(format!(
+                    "the Upload link holds {received} bytes, more than the file's {length}"
+                )));
             }
-            if let Some(received) = received {
-                if received > self.source.length {
-                    return Err(self.failure(format!(
-                        "the Upload link holds {received} bytes, more than the file's {}",
-                        self.source.length
-                    )));
-                }
-                offset = received;
-            }
-            if offset > before {
+            offset = Some(received);
+            if received > before {
                 stalled = 0;
             } else {
                 stalled += 1;
                 if stalled == MAX_STALLED_TRIES {
                     return Err(self.failure(format!(
-                        "{MAX_STALLED_TRIES} tries in a row moved no byte forward; the Upload link holds {offset} of {} bytes",
-                        self.source.length
+                        "{MAX_STALLED_TRIES} tries in a row moved no byte forward; the Upload link holds {received} of {length} bytes"
                     )));
                 }
             }
