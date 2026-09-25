@@ -30,7 +30,8 @@ CI runs format, lint, and test on Linux, macOS, and Windows for every push and p
   arguments into the request.
 - `src/upload.rs`: `--file`, which sends a file through an Upload link, in parts when it is large, and resumes.
 - `src/failure.rs`, `src/output.rs`: errors, exit codes, and JSON printing.
-- `src/login.rs`, `src/logout.rs`, `src/status.rs`, `src/accounts.rs`, `src/api.rs`: the commands.
+- `src/login.rs`, `src/logout.rs`, `src/status.rs`, `src/accounts.rs`, `src/chat.rs`, `src/api.rs`: the
+  commands.
 - `tests/fixtures/openapi.json`: the API description the generated-command tests serve.
 - `tests/`: tests that run the built binary against in-process fake Compliance and Auth hosts (`tests/support`).
   The tests never open a real browser: they run without a display, and the browser test on Linux puts a fake

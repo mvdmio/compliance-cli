@@ -75,10 +75,9 @@ pub fn read_json(response: Response<ureq::Body>) -> Result<Value, Failure> {
 }
 
 fn invalid_json(error: serde_json::Error) -> Failure {
-    Failure::local(
-        "invalid-response",
-        format!("The response claims JSON but does not parse: {error}"),
-    )
+    Failure::invalid_response(format!(
+        "The response claims JSON but does not parse: {error}"
+    ))
 }
 
 fn print_empty_success(status: u16) -> Result<(), Failure> {

@@ -114,10 +114,7 @@ struct Link {
 impl Link {
     fn read(answer: &Value, host: &str) -> Result<Self, Failure> {
         let invalid = |field: &str| {
-            Failure::local(
-                "invalid-response",
-                format!("The Upload link has no valid `{field}`."),
-            )
+            Failure::invalid_response(format!("The Upload link has no valid `{field}`."))
         };
         let url = answer["url"].as_str().ok_or_else(|| invalid("url"))?;
         let url = if url.starts_with('/') {

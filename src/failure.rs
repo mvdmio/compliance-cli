@@ -30,6 +30,11 @@ impl Failure {
         }
     }
 
+    /// The local error `invalid-response`, for a success body without the shape the CLI reads.
+    pub fn invalid_response(message: impl Into<String>) -> Self {
+        Failure::local("invalid-response", message)
+    }
+
     /// The local error `file`, for a file the CLI could not read or write.
     pub fn file(path: &Path, error: io::Error) -> Self {
         Failure::local("file", format!("{}: {error}", path.display()))

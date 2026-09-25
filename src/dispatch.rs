@@ -35,6 +35,11 @@ const QUERY: &AsciiSet = &SEGMENT
     .remove(b'!')
     .remove(b'*');
 
+/// `text` as one path segment.
+pub fn path_segment(text: &str) -> String {
+    utf8_percent_encode(text, SEGMENT).to_string()
+}
+
 /// Uploads each `--file` through an Upload link first; the call then carries the upload ids.
 pub fn run(operation: &Operation, matches: &ArgMatches) -> Result<(), Failure> {
     // Only an operation with an upload target has `--file`.
@@ -80,7 +85,7 @@ fn target(
     let mut path = operation.path.clone();
     for parameter in &operation.path_params {
         if let Some(value) = matches.get_one::<Value>(&generated::path_id(parameter)) {
-            let segment = utf8_percent_encode(&text(value), SEGMENT).to_string();
+            let segment = path_segment(&text(value));
             path = path.replace(&format!("{{{}}}", parameter.name), &segment);
         }
     }

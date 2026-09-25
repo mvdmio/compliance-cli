@@ -128,8 +128,8 @@ compliance evidence download 8d1e --out scan.pdf
   its actions, and `compliance <group> <action> --help` shows the operation's summary, its description, and every
   argument with its type.
 
-The hand-written commands (`login`, `logout`, `status`, `accounts list`, `accounts switch`, `api`, and
-`--version`) never need the description, and win over a generated command of the same name. Other actions in the
+The hand-written commands (`login`, `logout`, `status`, `accounts list`, `accounts switch`, `chat send`, `api`,
+and `--version`) never need the description, and win over a generated command of the same name. Other actions in the
 same group, such as a generated `accounts get`, stay reachable. A hand-written command without actions, such as `status`, hides a generated
 group of the same name.
 
@@ -171,6 +171,40 @@ fails with `network`.
 
 A new operation reaches you by itself. When you type a group or action the copy does not know, the CLI fetches a
 fresh copy at once, even within the hour. If the command is still unknown, it is a usage mistake (exit 2).
+
+## Talk to our Assistant
+
+```sh
+compliance chat send "Which risks are still open?"
+```
+
+`chat send "<text>"` sends one message to our Assistant, as a person does in the Assistant panel, and waits
+until its turn ends. Without `--conversation <id>`, it starts a new conversation. It then prints:
+
+```json
+{"conversationId":"…","turnState":"idle","lastError":null,"queued":false,"messages":[…]}
+```
+
+- `messages` holds every message after the one you sent, oldest first, as the API gives it: `seq`, `role`,
+  `sender`, the markdown `text`, `attachments`, and `toolActivity` (the tools our Assistant ran, each with its
+  outcome).
+- `conversationId` is the conversation your message landed in. When our Assistant judges it a new topic, this is
+  a new conversation, not the one you named. Continue with that id.
+- `lastError` says why the turn stopped early, when it did.
+- `queued` is true when your message went into a shared conversation while another member's turn was running.
+  Our Assistant answers it in the turn after that one, so `messages` may hold only that member's reply. Read the
+  answer later with `compliance conversations list-messages <conversationId> --after <seq> --wait 60`.
+
+**Answer a question or proposal.** Our Assistant asks and proposes in the text of its messages. Answer with the
+next `chat send`, passing the printed `conversationId`:
+
+```sh
+compliance chat send "Yes, go ahead." --conversation <conversationId>
+```
+
+An empty Assistant allowance (402 `allowance-exhausted`) or a conversation that cannot take a message now (409)
+prints the ProblemDetails on stderr and exits 1. For everything else about conversations, such as listing them or
+stopping a turn, use the generated `compliance conversations …` commands.
 
 ## Raw calls
 

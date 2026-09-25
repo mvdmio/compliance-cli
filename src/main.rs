@@ -1,5 +1,6 @@
 mod accounts;
 mod api;
+mod chat;
 mod cli;
 mod config;
 mod credential;
@@ -84,6 +85,7 @@ fn run(cli: Cli) -> Result<(), Failure> {
         Command::Logout => logout::run(),
         Command::Status => status::run(),
         Command::Accounts(command) => accounts::run(command),
+        Command::Chat(command) => chat::run(command),
         Command::Api(args) => api::run(args),
     }
 }

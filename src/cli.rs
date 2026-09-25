@@ -28,6 +28,10 @@ pub enum Command {
     #[command(subcommand)]
     Accounts(AccountsCommand),
 
+    /// Talk to our Assistant.
+    #[command(subcommand)]
+    Chat(ChatCommand),
+
     /// Make one raw call to the REST API with the current credential.
     Api(ApiArgs),
 }
@@ -49,6 +53,26 @@ pub enum AccountsCommand {
         /// The Account id, from `compliance accounts list`.
         id: u64,
     },
+}
+
+#[derive(Subcommand)]
+pub enum ChatCommand {
+    /// Send one message to our Assistant and wait for its reply.
+    ///
+    /// Prints `{"conversationId","turnState","lastError","queued","messages"}`: every message after the sent one, as the API
+    /// gives it. Answer the Assistant's questions and proposals with the next `chat send --conversation
+    /// <conversationId>`.
+    Send(ChatSendArgs),
+}
+
+#[derive(Args)]
+pub struct ChatSendArgs {
+    /// The message, in markdown.
+    pub text: String,
+
+    /// The conversation to continue. Without it, a new conversation starts.
+    #[arg(long, value_name = "ID")]
+    pub conversation: Option<String>,
 }
 
 #[derive(Args)]
