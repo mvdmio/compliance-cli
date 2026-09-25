@@ -4,7 +4,8 @@
 people who script Compliance from a terminal, and for their Agents (Claude Code, Codex, Gemini CLI, and others)
 that run shell commands. Every command prints JSON, and the exit code says what happened.
 
-The CLI talks to the Compliance REST API only. It collects no usage data and sends none.
+The CLI talks to the Compliance REST API only. It collects no usage data and sends none: no telemetry, no
+crash reports, no update checks.
 
 ## Install
 
@@ -20,7 +21,21 @@ Windows (PowerShell):
 powershell -ExecutionPolicy ByPass -c "irm https://compliance.mvdm.io/cli/install.ps1 | iex"
 ```
 
-Run the install line again to upgrade. `compliance --version` shows the build you run.
+The installer puts the `compliance` binary in `~/.cargo/bin` (or `$CARGO_HOME/bin`) and tells you if that folder
+is not on your `PATH`. Builds exist for Linux (x64 and arm64, static), macOS (arm64 and x64), and Windows (x64).
+
+Run the install line again to upgrade: the CLI never updates itself. `compliance --version` shows the build you
+run.
+
+## For Agents
+
+```sh
+compliance skill
+```
+
+`skill` prints one Markdown skill file that teaches an Agent when and how to use the CLI: signing in, command
+names, exit codes, files, our Assistant, and Browser handoffs. It is the only command whose output is not JSON.
+Give it to your Agent as a skill, or let the Agent run it. The same file is [`SKILL.md`](SKILL.md) in this repo.
 
 ## Sign in
 
@@ -129,7 +144,7 @@ compliance evidence download 8d1e --out scan.pdf
   argument with its type.
 
 The hand-written commands (`login`, `logout`, `status`, `accounts list`, `accounts switch`, `chat send`, `api`,
-and `--version`) never need the description, and win over a generated command of the same name. Other actions in the
+`skill`, and `--version`) never need the description, and win over a generated command of the same name. Other actions in the
 same group, such as a generated `accounts get`, stay reachable. A hand-written command without actions, such as `status`, hides a generated
 group of the same name.
 

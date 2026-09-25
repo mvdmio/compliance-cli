@@ -16,6 +16,10 @@ pub fn print_stderr_json(value: &Value) {
     let _ = writeln!(stderr.lock(), "{}", render(value, pretty));
 }
 
+pub fn print_stdout_raw(text: &str) {
+    let _ = io::stdout().lock().write_all(text.as_bytes());
+}
+
 pub fn print_stderr_raw(bytes: &[u8]) {
     let mut stderr = io::stderr().lock();
     let _ = stderr.write_all(bytes);

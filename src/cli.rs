@@ -34,6 +34,9 @@ pub enum Command {
 
     /// Make one raw call to the REST API with the current credential.
     Api(ApiArgs),
+
+    /// Print the Agent skill file: when and how to use this CLI, as Markdown.
+    Skill,
 }
 
 #[derive(Args)]

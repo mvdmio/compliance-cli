@@ -16,6 +16,7 @@ mod oauth;
 mod openapi;
 mod output;
 mod response;
+mod skill;
 mod status;
 mod store;
 mod upload;
@@ -87,6 +88,7 @@ fn run(cli: Cli) -> Result<(), Failure> {
         Command::Accounts(command) => accounts::run(command),
         Command::Chat(command) => chat::run(command),
         Command::Api(args) => api::run(args),
+        Command::Skill => skill::run(),
     }
 }
 
