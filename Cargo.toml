@@ -1,0 +1,22 @@
+[package]
+name = "compliance-cli"
+version = "0.1.0"
+edition = "2024"
+description = "Command-line tool for the Compliance REST API, built for people and their Agents."
+license = "MIT"
+repository = "https://github.com/mvdmio/compliance-cli"
+readme = "README.md"
+
+[[bin]]
+name = "compliance"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+httpdate = "1.0.3"
+serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
+ureq = "3.4.2"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tiny_http = "0.12.0"
