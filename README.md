@@ -133,6 +133,28 @@ The hand-written commands (`login`, `logout`, `status`, `accounts list`, `accoun
 same group, such as a generated `accounts get`, stay reachable. A hand-written command without actions, such as `status`, hides a generated
 group of the same name.
 
+### Files
+
+An operation that takes an upload id, such as `evidence create --upload-id`, also takes `--file <path>`. The CLI
+sends the file first and then makes the call with the new upload id. `--file` and the upload id option cannot be
+given together.
+
+```sh
+compliance evidence create --file scan.pdf --title "Scan"
+compliance conversations send-message 12 --text "See these" --file a.pdf --file b.png
+```
+
+- **Lists.** Where the operation takes a list of upload ids, such as `uploadIds`, `--file` repeats. Each file
+  becomes one id, in order. A file that cannot be read fails with `file` before any file is sent.
+- **Parts.** Each file goes through its own Upload link. A file up to the link's part size goes in one request; a
+  larger one, such as an Import ZIP, goes in parts of that size and then a finish. The part size always comes
+  from the link. A file larger than the link takes fails with `file` before any bytes go.
+- **Resume.** When a part is lost, or the link answers that it holds a different number of bytes, the CLI asks
+  the link how many bytes it holds and goes on from there. After five tries in a row that move no byte forward,
+  it fails with `upload`.
+- **The credential stays home.** The Upload link needs no bearer, so the CLI sends none to it.
+- stdout holds only the result of the final call. The CLI prints no upload progress.
+
 ### The cached description
 
 The CLI keeps a copy of the description per host, in the `compliance` folder of your cache folder:
@@ -171,7 +193,7 @@ compliance api GET /api/v1/reports/q3 --out q3.pdf
 - stdout holds the JSON result: pretty-printed in a terminal, compact otherwise. An empty success prints
   `{"ok":true,"status":<code>}`.
 - stderr holds errors: the API's ProblemDetails as it came, or `{"error":"<code>","message":"…"}` for a failure
-  on your side, such as `not-signed-in`, `network`, `file`, or `binary-response`.
+  on your side, such as `not-signed-in`, `network`, `file`, `upload`, or `binary-response`.
 - On a rate limit (429) the CLI waits for `Retry-After` and retries, up to three times.
 
 ## Exit codes

@@ -17,6 +17,7 @@ mod output;
 mod response;
 mod status;
 mod store;
+mod upload;
 
 use std::env;
 use std::ffi::OsString;

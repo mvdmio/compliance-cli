@@ -1,3 +1,5 @@
+use std::io;
+use std::path::Path;
 use std::process::ExitCode;
 
 use serde_json::json;
@@ -26,6 +28,11 @@ impl Failure {
             code,
             message: message.into(),
         }
+    }
+
+    /// The local error `file`, for a file the CLI could not read or write.
+    pub fn file(path: &Path, error: io::Error) -> Self {
+        Failure::local("file", format!("{}: {error}", path.display()))
     }
 
     pub fn report(self) -> ExitCode {

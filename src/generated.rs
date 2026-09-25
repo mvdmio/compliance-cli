@@ -10,10 +10,11 @@ use serde_json::{Number, Value};
 
 use crate::openapi::{Kind, Operation, Parameter, Schema, kebab_case};
 
-/// Option names every generated command keeps for itself. `--file` is reserved for upload targets.
+/// Option names every generated command keeps for itself.
 const GLOBAL_OPTIONS: [&str; 4] = ["help", "body", "out", "file"];
 pub const BODY: &str = "body";
 pub const OUT: &str = "out";
+pub const FILE: &str = "file";
 
 pub fn path_id(parameter: &Parameter) -> String {
     format!("path:{}", parameter.name)
@@ -25,6 +26,53 @@ pub fn query_id(parameter: &Parameter) -> String {
 
 pub fn field_id(parameter: &Parameter) -> String {
     format!("field:{}", parameter.name)
+}
+
+/// Where the upload id `--file` fills goes.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Location {
+    Query,
+    Body,
+}
+
+/// The parameter `--file` fills: the first query parameter or body field with an upload target.
+pub struct UploadSlot<'a> {
+    pub parameter: &'a Parameter,
+    pub location: Location,
+    pub target: &'a str,
+}
+
+impl UploadSlot<'_> {
+    pub fn id(&self) -> String {
+        match self.location {
+            Location::Query => query_id(self.parameter),
+            Location::Body => field_id(self.parameter),
+        }
+    }
+
+    /// Whether `parameter`, found at `location`, is this slot.
+    pub fn is(&self, parameter: &Parameter, location: Location) -> bool {
+        self.location == location && std::ptr::eq(self.parameter, parameter)
+    }
+}
+
+pub fn upload_slot(operation: &Operation) -> Option<UploadSlot<'_>> {
+    let query = operation
+        .query_params
+        .iter()
+        .map(|parameter| (parameter, Location::Query));
+    let fields = operation
+        .body
+        .iter()
+        .flat_map(|body| &body.fields)
+        .map(|field| (field, Location::Body));
+    query.chain(fields).find_map(|(parameter, location)| {
+        Some(UploadSlot {
+            parameter,
+            location,
+            target: parameter.schema.upload_target.as_deref()?,
+        })
+    })
 }
 
 /// Whether the command line can be parsed by the hand-written commands alone: no command, `--version`, or a
@@ -182,11 +230,25 @@ fn action(operation: &Operation) -> Command {
         );
     }
 
+    let upload = upload_slot(operation);
     let mut taken: HashSet<String> = GLOBAL_OPTIONS.iter().map(|name| name.to_string()).collect();
     for parameter in &operation.query_params {
-        let (long, note) = claim(&mut taken, &parameter.name, "query");
-        let arg = option(query_id(parameter), long, &parameter.schema).required(parameter.required);
-        command = command.arg(arg.help(help(parameter, &note)));
+        let (long, mut notes) = claim(&mut taken, &parameter.name, "query");
+        let arg = option(query_id(parameter), long.clone(), &parameter.schema);
+        let slot = upload
+            .as_ref()
+            .filter(|slot| slot.is(parameter, Location::Query));
+        let arg = if let Some(slot) = slot {
+            command = command.arg(file_option(slot, &long, &mut notes));
+            if parameter.required {
+                arg.required_unless_present(FILE)
+            } else {
+                arg
+            }
+        } else {
+            arg.required(parameter.required)
+        };
+        command = command.arg(arg.help(help(parameter, &notes)));
     }
     if let Some(body) = &operation.body {
         for field in &body.fields {
@@ -196,6 +258,12 @@ fn action(operation: &Operation) -> Command {
             }
             if let Some(target) = &field.schema.upload_target {
                 notes.push(format!("An upload id for the upload target `{target}`."));
+            }
+            if let Some(slot) = upload
+                .as_ref()
+                .filter(|slot| slot.is(field, Location::Body))
+            {
+                command = command.arg(file_option(slot, &long, &mut notes));
             }
             let arg = option(field_id(field), long, &field.schema);
             command = command.arg(arg.help(help(field, &notes)));
@@ -219,6 +287,27 @@ fn action(operation: &Operation) -> Command {
                 "Write the response body to this file and print a summary instead."
             }),
     )
+}
+
+/// `--file`, which uploads a file and sends its upload id in place of `--<long>`, and the note `--<long>` gets.
+fn file_option(slot: &UploadSlot, long: &str, notes: &mut Vec<String>) -> Arg {
+    notes.push(format!("Or pass --{FILE}."));
+    let mut help = format!(
+        "Upload this file to the upload target `{}` and send its upload id as `{}`, in place of --{long}.",
+        slot.target, slot.parameter.name
+    );
+    let arg = Arg::new(FILE)
+        .long(FILE)
+        .value_name("PATH")
+        .value_parser(clap::value_parser!(PathBuf))
+        .conflicts_with(slot.id());
+    let arg = if slot.parameter.schema.array {
+        help.push_str(" Repeat it for more files: each becomes one id, in order.");
+        arg.action(ArgAction::Append)
+    } else {
+        arg
+    };
+    arg.help(help)
 }
 
 /// The option name for `name`, and a note when it had to differ.

@@ -61,6 +61,7 @@ pub struct Schema {
     pub format: Option<String>,
     /// Allowed values of a string, integer, or number, as typed.
     pub choices: Vec<String>,
+    /// `x-upload-target`, on the schema or on its parameter: the value is an upload id, which `--file` fills.
     pub upload_target: Option<String>,
 }
 
@@ -174,13 +175,17 @@ fn parameters(document: &Value, item: &Value, operation: &Value) -> Vec<(String,
             continue;
         };
         found.retain(|(existing, known)| !(existing == location && known.name == name));
+        let schema = schema(&parameter["schema"]);
         found.push((
             location.to_string(),
             Parameter {
                 name: name.to_string(),
                 description: text(&parameter["description"]),
                 required: parameter["required"] == true,
-                schema: schema(&parameter["schema"]),
+                schema: Schema {
+                    upload_target: text(&parameter["x-upload-target"]).or(schema.upload_target),
+                    ..schema
+                },
             },
         ));
     }

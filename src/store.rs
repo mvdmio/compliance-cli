@@ -104,7 +104,7 @@ fn path() -> Result<PathBuf, Failure> {
 fn update<T>(change: impl FnOnce(&mut Credentials) -> T) -> Result<T, Failure> {
     let path = path()?;
     let folder = path.parent().expect("the file sits in a folder");
-    create_folder(folder).map_err(|error| file_failure(folder, error))?;
+    create_folder(folder).map_err(|error| Failure::file(folder, error))?;
     let _lock = Lock::take(&folder.join(format!("{FILE_NAME}.lock")))?;
 
     let mut credentials = read(&path)?;
@@ -113,7 +113,7 @@ fn update<T>(change: impl FnOnce(&mut Credentials) -> T) -> Result<T, Failure> {
         match fs::remove_file(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(file_failure(&path, error)),
+            Err(error) => return Err(Failure::file(&path, error)),
         }
     } else {
         write(&path, &credentials)?;
@@ -138,7 +138,7 @@ impl Lock {
                         thread::sleep(LOCK_POLL);
                     }
                 }
-                Err(error) => return Err(file_failure(path, error)),
+                Err(error) => return Err(Failure::file(path, error)),
             }
         }
     }
@@ -157,7 +157,7 @@ fn read(path: &Path) -> Result<Credentials, Failure> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Ok(Credentials::default());
         }
-        Err(error) => return Err(file_failure(path, error)),
+        Err(error) => return Err(Failure::file(path, error)),
     };
     serde_json::from_slice(&bytes).map_err(|error| {
         Failure::local(
@@ -180,7 +180,7 @@ fn write(path: &Path, credentials: &Credentials) -> Result<(), Failure> {
     if let Err(error) = written {
         // Ignored: the temporary file may not exist, and the write error is the one to report.
         let _ = fs::remove_file(&temporary);
-        return Err(file_failure(path, error));
+        return Err(Failure::file(path, error));
     }
     Ok(())
 }
@@ -212,8 +212,4 @@ fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = options.open(path)?;
     file.write_all(bytes)?;
     file.sync_all()
-}
-
-fn file_failure(path: &Path, error: io::Error) -> Failure {
-    Failure::local("file", format!("{}: {error}", path.display()))
 }

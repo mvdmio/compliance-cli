@@ -49,6 +49,10 @@ impl Client {
         }
     }
 
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
     pub fn credential(&self) -> &Credential {
         &self.credential
     }

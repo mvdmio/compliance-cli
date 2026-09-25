@@ -87,7 +87,7 @@ fn print_empty_success(status: u16) -> Result<(), Failure> {
 }
 
 /// A 403 `browser-handoff` becomes a Browser handoff; any other error body passes through as it came.
-fn problem(status: u16, content_type: Option<&str>, body: Vec<u8>) -> Failure {
+pub fn problem(status: u16, content_type: Option<&str>, body: Vec<u8>) -> Failure {
     let Some(problem) = content_type
         .filter(|content_type| is_json(content_type))
         .and_then(|_| serde_json::from_slice::<Value>(&body).ok())
@@ -183,8 +183,7 @@ fn read_all(reader: &mut impl Read) -> Result<Vec<u8>, Failure> {
 }
 
 fn write_file(reader: &mut impl Read, path: &Path) -> Result<u64, Failure> {
-    let file_failure =
-        |error: io::Error| Failure::local("file", format!("{}: {error}", path.display()));
+    let file_failure = |error: io::Error| Failure::file(path, error);
     let mut file = File::create(path).map_err(file_failure)?;
     let mut buffer = vec![0u8; 64 * 1024];
     let mut total = 0u64;

@@ -139,6 +139,19 @@
         }
       }
     },
+    "/api/v1/conversations/{id}/messages": {
+      "post": {
+        "tags": ["Conversations"],
+        "summary": "Send a message",
+        "operationId": "conversations.send-message",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MessageSend" } } },
+          "required": true
+        },
+        "responses": { "202": { "description": "Accepted", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
     "/api/v1/evidence/{id}/file": {
       "get": {
         "tags": ["Evidence"],
@@ -210,6 +223,17 @@
         "properties": {
           "kind": { "type": "string" },
           "id": { "type": "string" }
+        }
+      },
+      "MessageSend": {
+        "type": "object",
+        "properties": {
+          "text": { "type": ["null", "string"] },
+          "uploadIds": {
+            "type": ["null", "array"],
+            "items": { "type": "string", "format": "uuid" },
+            "x-upload-target": "conversation"
+          }
         }
       },
       "EvidenceCreate": {

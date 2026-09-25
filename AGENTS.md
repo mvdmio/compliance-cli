@@ -28,6 +28,7 @@ CI runs format, lint, and test on Linux, macOS, and Windows for every push and p
 - `src/openapi.rs`: reads operations, parameters, and body fields out of the description.
 - `src/generated.rs`: builds the generated commands beside the hand-written ones. `src/dispatch.rs`: turns their
   arguments into the request.
+- `src/upload.rs`: `--file`, which sends a file through an Upload link, in parts when it is large, and resumes.
 - `src/failure.rs`, `src/output.rs`: errors, exit codes, and JSON printing.
 - `src/login.rs`, `src/logout.rs`, `src/status.rs`, `src/accounts.rs`, `src/api.rs`: the commands.
 - `tests/fixtures/openapi.json`: the API description the generated-command tests serve.

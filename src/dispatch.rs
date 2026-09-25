@@ -10,10 +10,11 @@ use crate::api;
 use crate::config;
 use crate::credential;
 use crate::failure::Failure;
-use crate::generated::{self, BODY, OUT};
+use crate::generated::{self, BODY, FILE, Location, OUT, UploadSlot};
 use crate::http::Client;
-use crate::openapi::Operation;
+use crate::openapi::{Operation, Parameter};
 use crate::response;
+use crate::upload;
 
 /// RFC 3986 unreserved characters stay as they are in a path segment.
 const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
@@ -34,19 +35,48 @@ const QUERY: &AsciiSet = &SEGMENT
     .remove(b'!')
     .remove(b'*');
 
+/// Uploads each `--file` through an Upload link first; the call then carries the upload ids.
 pub fn run(operation: &Operation, matches: &ArgMatches) -> Result<(), Failure> {
-    let target = target(operation, matches);
-    let body = body(operation, matches)?;
+    // Only an operation with an upload target has `--file`.
+    let files: Vec<&PathBuf> = matches
+        .try_get_many::<PathBuf>(FILE)
+        .ok()
+        .flatten()
+        .into_iter()
+        .flatten()
+        .collect();
+    let upload = generated::upload_slot(operation).filter(|_| !files.is_empty());
+    let upload_field = upload
+        .as_ref()
+        .filter(|slot| slot.location == Location::Body)
+        .map(|slot| slot.parameter);
+    let mut body = body(operation, matches, upload_field)?;
     let out = matches.get_one::<PathBuf>(OUT);
 
     let host = config::host();
     let mut client = Client::new(host.clone(), credential::require(&host)?);
+    let uploaded = match &upload {
+        Some(slot) => Some((slot, upload::send_all(&mut client, slot, &files)?)),
+        None => None,
+    };
+    if let (Some(field), Some((_, ids)), Some(Value::Object(fields))) =
+        (upload_field, &uploaded, &mut body)
+    {
+        fields.insert(field.name.clone(), ids.clone());
+    }
+
+    let target = target(operation, matches, uploaded.as_ref());
+    let body = body.map(|value| value.to_string().into_bytes());
     let answer = client.send(&operation.method, &target, body.as_deref())?;
     response::print_response(answer, out.map(PathBuf::as_path))
 }
 
-/// The path with its placeholders filled, and the query string.
-fn target(operation: &Operation, matches: &ArgMatches) -> String {
+/// The path with its placeholders filled, and the query string. `uploaded` stands in for its slot's values.
+fn target(
+    operation: &Operation,
+    matches: &ArgMatches,
+    uploaded: Option<&(&UploadSlot, Value)>,
+) -> String {
     let mut path = operation.path.clone();
     for parameter in &operation.path_params {
         if let Some(value) = matches.get_one::<Value>(&generated::path_id(parameter)) {
@@ -56,10 +86,17 @@ fn target(operation: &Operation, matches: &ArgMatches) -> String {
     }
     let mut query = Vec::new();
     for parameter in &operation.query_params {
-        let values = matches
-            .get_many::<Value>(&generated::query_id(parameter))
-            .into_iter()
-            .flatten();
+        let values: Vec<&Value> = match uploaded {
+            Some((slot, ids)) if slot.is(parameter, Location::Query) => match ids {
+                Value::Array(ids) => ids.iter().collect(),
+                id => vec![id],
+            },
+            _ => matches
+                .get_many::<Value>(&generated::query_id(parameter))
+                .into_iter()
+                .flatten()
+                .collect(),
+        };
         for value in values {
             query.push(format!(
                 "{}={}",
@@ -75,8 +112,13 @@ fn target(operation: &Operation, matches: &ArgMatches) -> String {
     path
 }
 
-/// `--body` with the field options set on top of it. A required body with no input is `{}`.
-fn body(operation: &Operation, matches: &ArgMatches) -> Result<Option<Vec<u8>>, Failure> {
+/// `--body` with the field options set on top of it. A required body with no input is `{}`. `upload` is the
+/// field `--file` fills later, which counts as a field option.
+fn body(
+    operation: &Operation,
+    matches: &ArgMatches,
+    upload: Option<&Parameter>,
+) -> Result<Option<Value>, Failure> {
     let Some(body) = &operation.body else {
         return Ok(None);
     };
@@ -99,21 +141,22 @@ fn body(operation: &Operation, matches: &ArgMatches) -> Result<Option<Vec<u8>>, 
         }
     }
 
+    let has_fields = !fields.is_empty() || upload.is_some();
     let value = match whole {
-        None if fields.is_empty() && !body.required => return Ok(None),
+        None if !has_fields && !body.required => return Ok(None),
         None => Value::Object(fields),
         Some(Value::Object(mut whole)) => {
             whole.extend(fields);
             Value::Object(whole)
         }
-        Some(_) if !fields.is_empty() => {
+        Some(_) if has_fields => {
             return Err(Failure::Usage(
                 "--body must be a JSON object when field options are given too.".to_string(),
             ));
         }
         Some(whole) => whole,
     };
-    Ok(Some(value.to_string().into_bytes()))
+    Ok(Some(value))
 }
 
 /// A string as it is; any other value as JSON text.
