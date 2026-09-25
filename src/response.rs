@@ -128,7 +128,7 @@ fn header_text(response: &Response<ureq::Body>, name: header::HeaderName) -> Opt
         .map(str::to_string)
 }
 
-fn is_json(content_type: &str) -> bool {
+pub fn is_json(content_type: &str) -> bool {
     let essence = content_type
         .split(';')
         .next()

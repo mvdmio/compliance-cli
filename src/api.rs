@@ -45,13 +45,26 @@ fn method(text: &str) -> Result<Method, Failure> {
 
 /// `--body`: inline JSON, or `@path` to read it from a file. It must parse, so a typo fails before the call.
 fn json_body(text: &str) -> Result<Vec<u8>, Failure> {
-    let bytes = match text.strip_prefix('@') {
-        Some(path) => {
-            fs::read(path).map_err(|error| Failure::local("file", format!("{path}: {error}")))?
-        }
-        None => text.as_bytes().to_vec(),
-    };
-    serde_json::from_slice::<serde_json::Value>(&bytes)
-        .map_err(|error| Failure::Usage(format!("--body is not valid JSON: {error}")))?;
+    let bytes = body_text(text)?;
+    parse_body(&bytes)?;
     Ok(bytes)
+}
+
+/// `--body` of a generated command, parsed.
+pub fn json_value(text: &str) -> Result<serde_json::Value, Failure> {
+    parse_body(&body_text(text)?)
+}
+
+fn body_text(text: &str) -> Result<Vec<u8>, Failure> {
+    match text.strip_prefix('@') {
+        Some(path) => {
+            fs::read(path).map_err(|error| Failure::local("file", format!("{path}: {error}")))
+        }
+        None => Ok(text.as_bytes().to_vec()),
+    }
+}
+
+fn parse_body(bytes: &[u8]) -> Result<serde_json::Value, Failure> {
+    serde_json::from_slice(bytes)
+        .map_err(|error| Failure::Usage(format!("--body is not valid JSON: {error}")))
 }

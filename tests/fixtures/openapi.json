@@ -1,0 +1,224 @@
+{
+  "openapi": "3.1.1",
+  "info": { "title": "Example API", "version": "v1" },
+  "tags": [
+    { "name": "Accounts" },
+    { "name": "Evidence" },
+    { "name": "Frameworks" },
+    { "name": "Proposed coverage" },
+    { "name": "Risks" }
+  ],
+  "paths": {
+    "/api/v1/risks": {
+      "get": {
+        "tags": ["Risks"],
+        "summary": "List Risks",
+        "description": "Lists the Risks of the Account, newest first.",
+        "operationId": "risks.list",
+        "parameters": [
+          { "name": "$filter", "in": "query", "description": "An OData filter.", "schema": { "type": "string" } },
+          { "name": "$select", "in": "query", "schema": { "type": "string" } },
+          { "name": "$orderby", "in": "query", "schema": { "type": "string" } },
+          { "name": "$expand", "in": "query", "schema": { "type": "string" } },
+          {
+            "name": "$top",
+            "in": "query",
+            "description": "At most this many Risks.",
+            "schema": { "pattern": "^-?(?:0|[1-9]\\d*)$", "type": ["integer", "string"], "format": "int32" }
+          },
+          {
+            "name": "$skip",
+            "in": "query",
+            "schema": { "pattern": "^-?(?:0|[1-9]\\d*)$", "type": ["integer", "string"], "format": "int32" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      },
+      "post": {
+        "tags": ["Risks"],
+        "summary": "Create a Risk",
+        "description": "Records a Risk. Answers 201 with the new Risk.",
+        "operationId": "risks.create",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RiskCreate" } } },
+          "required": true
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/v1/risks/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "description": "The Risk id.", "schema": { "type": "string", "format": "uuid" } }
+      ],
+      "patch": {
+        "tags": ["Risks"],
+        "summary": "Update a Risk",
+        "operationId": "risks.update",
+        "parameters": [
+          { "name": "notify", "in": "query", "description": "Tell the owner.", "schema": { "type": "boolean" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "oneOf": [{ "type": "null" }, { "$ref": "#/components/schemas/RiskUpdate" }] }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/v1/risks/{id}/accept": {
+      "post": {
+        "tags": ["Risks"],
+        "summary": "Accept a Risk",
+        "description": "Accepts the Risk as it stands, so it needs no treatment.",
+        "operationId": "risks.accept",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "description": "The Risk id.", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/v1/frameworks": {
+      "get": {
+        "tags": ["Frameworks"],
+        "summary": "List Frameworks",
+        "operationId": "frameworks.list",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/v1/frameworks/{frameworkId}/requirements/{requirementId}": {
+      "get": {
+        "tags": ["Frameworks"],
+        "summary": "Get a Requirement",
+        "operationId": "frameworks.get-requirement",
+        "parameters": [
+          { "name": "requirementId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "frameworkId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/v1/frameworks/{frameworkId}/proposed-coverage": {
+      "get": {
+        "tags": ["Proposed coverage"],
+        "summary": "List proposed coverage",
+        "description": "Lists the coverage proposed for the Framework.",
+        "operationId": "frameworks.list-proposed-coverage",
+        "parameters": [
+          { "name": "frameworkId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/v1/evidence": {
+      "post": {
+        "tags": ["Evidence"],
+        "summary": "Create Evidence",
+        "operationId": "evidence.create",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EvidenceCreate" } } },
+          "required": true
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/v1/evidence/{id}/file": {
+      "get": {
+        "tags": ["Evidence"],
+        "summary": "Download an Evidence file",
+        "operationId": "evidence.download",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+          "404": { "description": "Not found", "content": { "application/problem+json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/v1/accounts": {
+      "get": {
+        "tags": ["Accounts"],
+        "summary": "List Accounts",
+        "operationId": "accounts.list",
+        "parameters": [
+          { "name": "$top", "in": "query", "schema": { "type": ["integer", "string"], "pattern": "^-?(?:0|[1-9]\\d*)$" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/v1/accounts/{accountId}": {
+      "get": {
+        "tags": ["Accounts"],
+        "summary": "Get an Account",
+        "operationId": "accounts.get",
+        "parameters": [
+          { "name": "accountId", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RiskCreate": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": { "type": ["null", "string"], "description": "A short name for the Risk." },
+          "status": { "enum": ["Open", "Accepted", "Closed"], "type": ["null", "string"] },
+          "likelihood": { "pattern": "^-?(?:0|[1-9]\\d*)$", "type": ["null", "integer", "string"], "format": "int32" },
+          "score": { "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$", "type": ["null", "number", "string"], "format": "double" },
+          "impact": { "enum": [1, 2, 3], "type": ["null", "integer"] },
+          "private": { "type": ["null", "boolean"] },
+          "ownerIds": { "type": ["null", "array"], "items": { "type": "string", "format": "uuid" } },
+          "collectedAt": { "type": ["null", "string"], "format": "date" },
+          "owner": { "oneOf": [{ "type": "null" }, { "$ref": "#/components/schemas/Owner" }] }
+        }
+      },
+      "RiskUpdate": {
+        "type": "object",
+        "properties": {
+          "title": { "type": ["null", "string"] },
+          "notify": { "type": ["null", "boolean"], "description": "Stored on the Risk." },
+          "out": { "type": ["null", "string"], "description": "The way out of the Risk." }
+        }
+      },
+      "Owner": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string" },
+          "id": { "type": "string" }
+        }
+      },
+      "EvidenceCreate": {
+        "type": "object",
+        "properties": {
+          "uploadId": { "type": ["null", "string"], "format": "uuid", "x-upload-target": "evidence" },
+          "title": { "type": ["null", "string"] }
+        }
+      }
+    }
+  }
+}

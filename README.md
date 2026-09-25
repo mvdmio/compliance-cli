@@ -98,6 +98,58 @@ compliance accounts switch 42
 `accounts list` lists your Accounts, the current one marked `"current": true`. `accounts switch <id>` moves the
 credential into another Account, for every later command and for everyone who uses that credential.
 
+## Commands from the API
+
+Every REST operation is a command. The CLI builds these commands when it runs, from the host's OpenAPI description
+at `/openapi/v1.json`, so a new operation shows up without a new CLI release.
+
+```sh
+compliance risks list --filter "status eq 'Open'" --top 5
+compliance risks accept 3f2c9a
+compliance risks create --title Flood --likelihood 3
+compliance evidence download 8d1e --out scan.pdf
+```
+
+- **Names.** An operation's `operationId` `<group>.<action>` becomes `compliance <group> <action>`, both in
+  kebab-case. So `risks.accept` is `compliance risks accept`. The group comes from the `operationId`, not from the
+  tag: `compliance <group> --help` lists the tags its actions carry.
+- **Arguments.** Path parameters are positional arguments, in path order. Query parameters are options, with the
+  OData `$` dropped: `--filter`, `--select`, `--orderby`, `--expand`, `--top`, `--skip`. The top-level fields of a
+  JSON body are options too, kebab-cased (`collectedAt` is `--collected-at`) and typed from the schema: numbers
+  are sent as numbers, `true`/`false` as booleans, a list option repeats, and an object takes JSON text.
+- **`--body <json|@file>`** sends a whole body. Field options win over the same keys in it. An operation that
+  needs a body and gets none sends `{}`.
+- **Name clashes.** `--help`, `--body`, `--out`, and `--file` are always the CLI's own. After them, query
+  parameters take their names before body fields. A name already taken gets a `query-` or `field-` prefix (so a
+  body field `out` is `--field-out`), and the option's help says so.
+- **Downloads.** An operation that answers a file, not JSON, needs `--out <path>`. Without it, the command is a
+  usage mistake and sends nothing.
+- **Help.** `compliance --help` lists the hand-written commands and the groups. `compliance <group> --help` lists
+  its actions, and `compliance <group> <action> --help` shows the operation's summary, its description, and every
+  argument with its type.
+
+The hand-written commands (`login`, `logout`, `status`, `accounts list`, `accounts switch`, `api`, and
+`--version`) never need the description, and win over a generated command of the same name. Other actions in the
+same group, such as a generated `accounts get`, stay reachable. A hand-written command without actions, such as `status`, hides a generated
+group of the same name.
+
+### The cached description
+
+The CLI keeps a copy of the description per host, in the `compliance` folder of your cache folder:
+
+| OS | Folder |
+| -- | ------ |
+| Linux | `$XDG_CACHE_HOME/compliance` or `~/.cache/compliance` |
+| macOS | `~/Library/Caches/compliance` |
+| Windows | `%LOCALAPPDATA%\compliance` |
+
+`COMPLIANCE_CACHE_DIR` sets another folder. A copy younger than one hour is used as it is. An older one is
+fetched again; if that fails, the old copy is used. With no copy and no answer from the host, a generated command
+fails with `network`.
+
+A new operation reaches you by itself. When you type a group or action the copy does not know, the CLI fetches a
+fresh copy at once, even within the hour. If the command is still unknown, it is a usage mistake (exit 2).
+
 ## Raw calls
 
 `compliance api <method> <path>` makes one call with your credential. The path is relative to the host, and a
@@ -141,6 +193,7 @@ person; the CLI never opens a browser for it.
 | `COMPLIANCE_TOKEN` | A Personal token, sent as the bearer. Wins over the stored sign-in. |
 | `COMPLIANCE_URL` | The Compliance host. Defaults to `https://compliance.mvdm.io`. |
 | `COMPLIANCE_CONFIG_DIR` | The folder for the stored sign-in. |
+| `COMPLIANCE_CACHE_DIR` | The folder for the cached API description. |
 
 ## Licence
 

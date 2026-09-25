@@ -223,7 +223,8 @@ pub fn compliance_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
 }
 
 /// The binary with no display, so `login` never opens a real browser, and with `config` as the config folder
-/// unless `env` names one, so the stored sign-in of the person running the tests stays out.
+/// and `config/cache` as the cache folder unless `env` names them, so the stored sign-in and cached API
+/// description of the person running the tests stay out.
 pub fn command(dir: &Path, args: &[&str], env: &[(&str, &str)], config: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_compliance"));
     command.current_dir(dir).args(args);
@@ -236,8 +237,16 @@ pub fn command(dir: &Path, args: &[&str], env: &[(&str, &str)], config: &Path) -
         command.env_remove(name);
     }
     command.env("COMPLIANCE_CONFIG_DIR", config);
+    command.env("COMPLIANCE_CACHE_DIR", config.join("cache"));
     command.envs(env.iter().copied());
     command
+}
+
+pub const DESCRIPTION_PATH: &str = "/openapi/v1.json";
+
+/// The fixture API description in `tests/fixtures/openapi.json`.
+pub fn fixture() -> Value {
+    serde_json::from_str(include_str!("../fixtures/openapi.json")).expect("the fixture is JSON")
 }
 
 pub const RESOURCE_PATH: &str = "/api";
