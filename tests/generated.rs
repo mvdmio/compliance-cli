@@ -5,10 +5,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use serde_json::{Value, json};
-use support::{DESCRIPTION_PATH, FakeServer, Recorded, Reply, Run, compliance_in, fixture};
+use support::{
+    DESCRIPTION_PATH, FakeServer, Recorded, Reply, Run, TOKEN, body_json, compliance_in, fixture,
+};
 use tempfile::TempDir;
 
-const TOKEN: &str = "cmp_pat_test";
 const FILE_BYTES: &[u8] = b"\x00\x01binary\xff";
 
 /// A fake Compliance host that serves an API description which a test can change between runs, and one cache
@@ -98,10 +99,6 @@ impl Host {
                 .expect("age the cached copy");
         }
     }
-}
-
-fn body_json(request: &Recorded) -> Value {
-    serde_json::from_slice(&request.body).expect("a JSON body")
 }
 
 fn with_operation(group_action: &str, path: &str) -> Value {
@@ -565,6 +562,17 @@ fn a_download_without_out_is_a_usage_mistake_and_sends_no_request() {
     let host = Host::start();
 
     let run = host.run(&["evidence", "download", "e1"]);
+
+    assert_eq!(run.code, 2, "{run:#?}");
+    assert_eq!(run.stderr_json()["error"], "usage");
+    assert!(host.api_requests().is_empty());
+}
+
+#[test]
+fn out_on_a_command_that_answers_json_is_a_usage_mistake() {
+    let host = Host::start();
+
+    let run = host.run(&["risks", "accept", "r1", "--out", "risk.json"]);
 
     assert_eq!(run.code, 2, "{run:#?}");
     assert_eq!(run.stderr_json()["error"], "usage");

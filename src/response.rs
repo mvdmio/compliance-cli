@@ -5,7 +5,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 use ureq::http::{Response, header};
 
-use crate::failure::Failure;
+use crate::failure::{ErrorCode, Failure};
 use crate::output;
 
 const BROWSER_HANDOFF: &str = "browser-handoff";
@@ -46,7 +46,7 @@ pub fn print_response(response: Response<ureq::Body>, out: Option<&Path>) -> Res
             return print_empty_success(status);
         }
         return Err(Failure::local(
-            "binary-response",
+            ErrorCode::BinaryResponse,
             format!(
                 "The response is {}, not JSON. Pass --out <path> to save it.",
                 content_type.as_deref().unwrap_or("of no stated type")
@@ -93,7 +93,7 @@ pub fn problem(status: u16, content_type: Option<&str>, body: Vec<u8>) -> Failur
     else {
         // An empty or non-JSON body (such as a proxy's HTML page) is not the API's; stderr stays JSON.
         return Failure::local(
-            "http",
+            ErrorCode::Http,
             format!(
                 "The server answered {status} with {}.",
                 if body.is_empty() {
@@ -119,7 +119,7 @@ pub fn problem(status: u16, content_type: Option<&str>, body: Vec<u8>) -> Failur
     Failure::Problem(body)
 }
 
-fn header_text(response: &Response<ureq::Body>, name: header::HeaderName) -> Option<String> {
+pub fn header_text(response: &Response<ureq::Body>, name: header::HeaderName) -> Option<String> {
     response
         .headers()
         .get(name)
@@ -199,5 +199,5 @@ fn write_file(reader: &mut impl Read, path: &Path) -> Result<u64, Failure> {
 }
 
 fn network(error: io::Error) -> Failure {
-    Failure::local("network", error.to_string())
+    Failure::local(ErrorCode::Network, error.to_string())
 }

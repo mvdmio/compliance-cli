@@ -5,9 +5,7 @@ use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::json;
-use support::{FakeServer, Reply, compliance, compliance_in};
-
-const TOKEN: &str = "cmp_pat_test";
+use support::{FakeServer, Reply, TOKEN, compliance, compliance_in, compliance_with_token};
 
 fn env(server: &FakeServer) -> Vec<(&'static str, String)> {
     vec![
@@ -17,11 +15,7 @@ fn env(server: &FakeServer) -> Vec<(&'static str, String)> {
 }
 
 fn api(server: &FakeServer, args: &[&str]) -> support::Run {
-    let env = env(server);
-    let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let mut all = vec!["api"];
-    all.extend_from_slice(args);
-    compliance(&all, &env)
+    compliance_with_token(server, &[&["api"], args].concat())
 }
 
 #[test]

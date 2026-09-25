@@ -4,9 +4,8 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use serde_json::{Value, json};
-use support::{FakeServer, Recorded, Reply, compliance};
+use support::{FakeServer, Recorded, Reply, compliance_with_token};
 
-const TOKEN: &str = "cmp_pat_test";
 const CREATED: &str = "c0ffee00-0000-4000-8000-000000000001";
 const SPLIT: &str = "5b1170ff-0000-4000-8000-000000000002";
 
@@ -68,15 +67,7 @@ fn message(seq: i64, text: &str) -> Value {
 }
 
 fn chat(server: &FakeServer, args: &[&str]) -> support::Run {
-    let mut all = vec!["chat", "send"];
-    all.extend_from_slice(args);
-    compliance(
-        &all,
-        &[
-            ("COMPLIANCE_URL", &server.url()),
-            ("COMPLIANCE_TOKEN", TOKEN),
-        ],
-    )
+    compliance_with_token(server, &[&["chat", "send"], args].concat())
 }
 
 fn calls(server: &FakeServer) -> Vec<String> {
@@ -102,7 +93,6 @@ fn without_a_conversation_it_starts_one_sends_and_reads_until_idle() {
         run.stdout_json(),
         json!({
             "conversationId": CREATED,
-            "turnState": "idle",
             "lastError": null,
             "queued": false,
             "messages": [reply],

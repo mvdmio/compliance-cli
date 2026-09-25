@@ -2,12 +2,10 @@ use serde_json::{Value, json};
 use ureq::http::Method;
 
 use crate::cli::{ChatCommand, ChatSendArgs};
-use crate::config;
-use crate::credential;
-use crate::dispatch::path_segment;
 use crate::failure::Failure;
 use crate::http::Client;
 use crate::output;
+use crate::request::path_segment;
 use crate::response;
 
 const CONVERSATIONS: &str = "/api/v1/conversations";
@@ -22,8 +20,7 @@ pub fn run(command: ChatCommand) -> Result<(), Failure> {
 }
 
 fn send(args: ChatSendArgs) -> Result<(), Failure> {
-    let host = config::host();
-    let mut client = Client::new(host.clone(), credential::require(&host)?);
+    let mut client = Client::signed_in()?;
 
     let requested_id = match args.conversation {
         Some(id) => id,
@@ -66,7 +63,6 @@ fn send(args: ChatSendArgs) -> Result<(), Failure> {
         if turn_state == "idle" {
             output::print_json(&json!({
                 "conversationId": conversation_id,
-                "turnState": turn_state,
                 "lastError": page["lastError"],
                 "queued": queued,
                 "messages": messages,

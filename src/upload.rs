@@ -1,8 +1,9 @@
 //! `--file`: sends one file through an Upload link and yields its upload id.
 //!
 //! The link takes the bytes without a bearer: a file up to `partSize` goes as one `PUT <url>`, a larger one as
-//! `PUT <url>?offset=N` parts and then `POST <url>/finish`. After a lost part or a 409 naming `bytesReceived`,
-//! `GET <url>` says where to go on from.
+//! `PUT <url>?offset=N` parts and then `POST <url>/finish`. A 409 naming `bytesReceived` says where to go on
+//! from; after a request that got no usable answer, `GET <url>` says it. Once a whole-file `PUT` has failed, the
+//! rest goes as parts, because the link refuses a second whole file once it holds any byte.
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
@@ -12,7 +13,7 @@ use serde_json::{Value, json};
 use ureq::Agent;
 use ureq::http::{Method, Response, header};
 
-use crate::failure::Failure;
+use crate::failure::{ErrorCode, Failure};
 use crate::generated::UploadSlot;
 use crate::http::{self, Client};
 use crate::response;
@@ -61,7 +62,12 @@ impl<'a> Source<'a> {
         let file_name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
-            .ok_or_else(|| Failure::local("file", format!("{} names no file.", path.display())))?;
+            .ok_or_else(|| {
+                Failure::local(
+                    ErrorCode::File,
+                    format!("{} names no file.", path.display()),
+                )
+            })?;
         Ok(Source {
             file,
             path,
@@ -85,7 +91,7 @@ fn send(client: &mut Client, target: &str, source: Source) -> Result<Value, Fail
         .filter(|max_bytes| source.length > *max_bytes)
     {
         return Err(Failure::local(
-            "file",
+            ErrorCode::File,
             format!(
                 "{} is {} bytes; the upload target `{target}` takes at most {max_bytes}.",
                 source.path.display(),
@@ -148,8 +154,10 @@ impl Link {
 enum Answer {
     /// A 2xx, with the upload's status when the body carried one.
     Accepted(Option<Status>),
-    /// A network error, a 5xx, or a 409 naming `bytesReceived`: ask the link where it stands.
-    Resume,
+    /// A 409 naming the bytes the link holds: go on from there.
+    Holds(u64),
+    /// A network error or a 5xx: ask the link where it stands.
+    Lost,
 }
 
 struct Status {
@@ -174,7 +182,7 @@ struct Sender<'a> {
 
 impl Sender<'_> {
     fn send(&mut self) -> Result<(), Failure> {
-        let whole = self.source.length <= self.link.part_size;
+        let mut whole = self.source.length <= self.link.part_size;
         let mut offset = 0;
         let mut stalled = 0;
         loop {
@@ -186,18 +194,23 @@ impl Sender<'_> {
             } else {
                 self.finish()?
             };
+            let accepted = matches!(answer, Answer::Accepted(_));
             let received = match answer {
                 Answer::Accepted(_) if whole || offset == self.source.length => return Ok(()),
                 Answer::Accepted(status) => Some(status.map_or_else(
                     || offset + self.part_length(offset),
                     |status| status.bytes_received,
                 )),
-                Answer::Resume => match self.status()? {
+                Answer::Holds(received) => Some(received),
+                Answer::Lost => match self.status()? {
                     Some(status) if status.finished => return Ok(()),
                     Some(status) => Some(status.bytes_received),
                     None => None,
                 },
             };
+            if !accepted {
+                whole = false;
+            }
             if let Some(received) = received {
                 if received > self.source.length {
                     return Err(self.failure(format!(
@@ -261,7 +274,7 @@ impl Sender<'_> {
             .call();
         Ok(match classify(&self.link.url, result)? {
             Answer::Accepted(status) => status,
-            Answer::Resume => None,
+            Answer::Holds(_) | Answer::Lost => None,
         })
     }
 
@@ -280,7 +293,7 @@ impl Sender<'_> {
             .map_err(file_failure)?;
         if (bytes.len() as u64) < length {
             return Err(Failure::local(
-                "file",
+                ErrorCode::File,
                 format!("{} changed while it was being sent.", path.display()),
             ));
         }
@@ -289,7 +302,7 @@ impl Sender<'_> {
 
     fn failure(&self, reason: String) -> Failure {
         Failure::local(
-            "upload",
+            ErrorCode::Upload,
             format!("{}: {reason}.", self.source.path.display()),
         )
     }
@@ -304,14 +317,10 @@ fn classify(
         Err(error @ (ureq::Error::BadUri(_) | ureq::Error::Http(_))) => {
             return Err(http::transport_failure(url, error));
         }
-        Err(_) => return Ok(Answer::Resume),
+        Err(_) => return Ok(Answer::Lost),
     };
     let status = response.status().as_u16();
-    let content_type = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
+    let content_type = response::header_text(&response, header::CONTENT_TYPE);
     let mut bytes = Vec::new();
     if response
         .into_body()
@@ -319,18 +328,19 @@ fn classify(
         .read_to_end(&mut bytes)
         .is_err()
     {
-        return Ok(Answer::Resume);
+        return Ok(Answer::Lost);
     }
     let value = serde_json::from_slice::<Value>(&bytes).ok();
     match status {
         200..=299 => Ok(Answer::Accepted(value.as_ref().and_then(Status::read))),
-        409 if value
+        409 => match value
             .as_ref()
-            .is_some_and(|value| value["bytesReceived"].is_u64()) =>
+            .and_then(|value| value["bytesReceived"].as_u64())
         {
-            Ok(Answer::Resume)
-        }
-        500.. => Ok(Answer::Resume),
+            Some(received) => Ok(Answer::Holds(received)),
+            None => Err(response::problem(status, content_type.as_deref(), bytes)),
+        },
+        500.. => Ok(Answer::Lost),
         _ => Err(response::problem(status, content_type.as_deref(), bytes)),
     }
 }

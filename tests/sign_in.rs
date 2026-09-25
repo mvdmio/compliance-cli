@@ -518,10 +518,6 @@ fn status_with_a_personal_token_names_it_and_the_current_account() {
             "credential": { "kind": "personal-token", "source": "COMPLIANCE_TOKEN" },
             "user": null,
             "account": { "id": 2, "name": "Beta", "current": true },
-            "accounts": [
-                { "id": 1, "name": "Alpha", "current": false },
-                { "id": 2, "name": "Beta", "current": true },
-            ],
         })
     );
     assert_eq!(
@@ -548,7 +544,6 @@ fn status_with_a_stored_sign_in_names_it_the_user_and_the_current_account() {
         json!({ "name": "Ada Lovelace", "email": "ada@example.test" })
     );
     assert_eq!(status["account"]["id"], 2);
-    assert_eq!(status["accounts"].as_array().unwrap().len(), 2);
 }
 
 #[test]
@@ -566,7 +561,6 @@ fn status_without_a_credential_reports_signed_out_and_exits_0() {
             "credential": null,
             "user": null,
             "account": null,
-            "accounts": [],
         })
     );
     assert!(hosts.compliance.requests().is_empty());

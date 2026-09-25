@@ -15,6 +15,7 @@ mod logout;
 mod oauth;
 mod openapi;
 mod output;
+mod request;
 mod response;
 mod skill;
 mod status;

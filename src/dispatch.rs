@@ -3,27 +3,19 @@
 use std::path::PathBuf;
 
 use clap::ArgMatches;
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+use percent_encoding::{AsciiSet, utf8_percent_encode};
 use serde_json::{Map, Value};
 
-use crate::api;
-use crate::config;
-use crate::credential;
 use crate::failure::Failure;
 use crate::generated::{self, BODY, FILE, Location, OUT, UploadSlot};
 use crate::http::Client;
 use crate::openapi::{Operation, Parameter};
+use crate::request::{self, UNRESERVED, path_segment};
 use crate::response;
 use crate::upload;
 
-/// RFC 3986 unreserved characters stay as they are in a path segment.
-const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
 /// Also keeps the characters OData expressions use.
-const QUERY: &AsciiSet = &SEGMENT
+const QUERY: &AsciiSet = &UNRESERVED
     .remove(b'$')
     .remove(b'\'')
     .remove(b'(')
@@ -34,11 +26,6 @@ const QUERY: &AsciiSet = &SEGMENT
     .remove(b'@')
     .remove(b'!')
     .remove(b'*');
-
-/// `text` as one path segment.
-pub fn path_segment(text: &str) -> String {
-    utf8_percent_encode(text, SEGMENT).to_string()
-}
 
 /// Uploads each `--file` through an Upload link first; the call then carries the upload ids.
 pub fn run(operation: &Operation, matches: &ArgMatches) -> Result<(), Failure> {
@@ -56,10 +43,10 @@ pub fn run(operation: &Operation, matches: &ArgMatches) -> Result<(), Failure> {
         .filter(|slot| slot.location == Location::Body)
         .map(|slot| slot.parameter);
     let mut body = body(operation, matches, upload_field)?;
-    let out = matches.get_one::<PathBuf>(OUT);
+    // Only a download has `--out`.
+    let out = matches.try_get_one::<PathBuf>(OUT).ok().flatten();
 
-    let host = config::host();
-    let mut client = Client::new(host.clone(), credential::require(&host)?);
+    let mut client = Client::signed_in()?;
     let uploaded = match &upload {
         Some(slot) => Some((slot, upload::send_all(&mut client, slot, &files)?)),
         None => None,
@@ -129,7 +116,7 @@ fn body(
     };
     let whole = matches
         .get_one::<String>(BODY)
-        .map(|text| api::json_value(text))
+        .map(|text| request::body_value(text))
         .transpose()?;
     let mut fields = Map::new();
     for field in &body.fields {

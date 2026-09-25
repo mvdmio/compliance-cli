@@ -101,8 +101,9 @@ compliance status
 ```
 
 `status` shows who you are and where commands land:
-`{"host":…,"signedIn":…,"credential":{"kind":…,"source":…},"user":…,"account":…,"accounts":[…]}`. The credential
-kind is `personal-token` or `agent-connection`, and the source is `COMPLIANCE_TOKEN` or `stored sign-in`. Without
+`{"host":…,"signedIn":…,"credential":{"kind":…,"source":…},"user":…,"account":…}`. The credential
+kind is `personal-token` or `agent-connection`, and the source is `COMPLIANCE_TOKEN` or `stored sign-in`. `user`
+comes from the sign-in, so it is `null` with a Personal token: the API has no call that names the User. Without
 a credential it prints `"signedIn": false` and exits 0.
 
 ```sh
@@ -138,7 +139,7 @@ compliance evidence download 8d1e --out scan.pdf
   parameters take their names before body fields. A name already taken gets a `query-` or `field-` prefix (so a
   body field `out` is `--field-out`), and the option's help says so.
 - **Downloads.** An operation that answers a file, not JSON, needs `--out <path>`. Without it, the command is a
-  usage mistake and sends nothing.
+  usage mistake and sends nothing. Only these operations have `--out`.
 - **Help.** `compliance --help` lists the hand-written commands and the groups. `compliance <group> --help` lists
   its actions, and `compliance <group> <action> --help` shows the operation's summary, its description, and every
   argument with its type.
@@ -164,9 +165,10 @@ compliance conversations send-message 12 --text "See these" --file a.pdf --file 
 - **Parts.** Each file goes through its own Upload link. A file up to the link's part size goes in one request; a
   larger one, such as an Import ZIP, goes in parts of that size and then a finish. The part size always comes
   from the link. A file larger than the link takes fails with `file` before any bytes go.
-- **Resume.** When a part is lost, or the link answers that it holds a different number of bytes, the CLI asks
-  the link how many bytes it holds and goes on from there. After five tries in a row that move no byte forward,
-  it fails with `upload`.
+- **Resume.** When the link answers 409 with the number of bytes it holds, the CLI goes on from there. When a
+  request gets no usable answer, the CLI asks the link how many bytes it holds and goes on from there. A file
+  whose one request failed goes on in parts, since the link takes a whole file only while it holds no byte.
+  After five tries in a row that move no byte forward, it fails with `upload`.
 - **The credential stays home.** The Upload link needs no bearer, so the CLI sends none to it.
 - stdout holds only the result of the final call. The CLI prints no upload progress.
 
@@ -197,7 +199,7 @@ compliance chat send "Which risks are still open?"
 until its turn ends. Without `--conversation <id>`, it starts a new conversation. It then prints:
 
 ```json
-{"conversationId":"…","turnState":"idle","lastError":null,"queued":false,"messages":[…]}
+{"conversationId":"…","lastError":null,"queued":false,"messages":[…]}
 ```
 
 - `messages` holds every message after the one you sent, oldest first, as the API gives it: `seq`, `role`,

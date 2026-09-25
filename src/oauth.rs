@@ -6,7 +6,7 @@ use serde_json::Value;
 use ureq::Agent;
 
 use crate::discovery::AuthServer;
-use crate::failure::Failure;
+use crate::failure::{ErrorCode, Failure};
 use crate::http;
 use crate::store::{self, SignIn, User};
 
@@ -25,9 +25,9 @@ pub struct OAuthError {
 impl OAuthError {
     pub fn into_failure(self) -> Failure {
         let code = match self.error.as_str() {
-            "access_denied" => "access-denied",
-            "expired_token" => "expired-token",
-            _ => "auth",
+            "access_denied" => ErrorCode::AccessDenied,
+            "expired_token" => ErrorCode::ExpiredToken,
+            _ => ErrorCode::Auth,
         };
         let message = match self.description {
             Some(description) => format!("Auth answered {}: {description}", self.error),
@@ -51,15 +51,7 @@ pub fn post_form(
     url: &str,
     form: &[(&str, &str)],
 ) -> Result<Result<Value, OAuthError>, Failure> {
-    let mut response = agent
-        .post(url)
-        .send_form(form.iter().copied())
-        .map_err(|error| http::transport_failure(url, error))?;
-    let status = response.status();
-    let bytes = response
-        .body_mut()
-        .read_to_vec()
-        .map_err(|error| http::transport_failure(url, error))?;
+    let (status, bytes) = http::read_answer(url, agent.post(url).send_form(form.iter().copied()))?;
     let body: Option<Value> = serde_json::from_slice(&bytes).ok();
     if status.is_success() {
         return Ok(Ok(body.unwrap_or(Value::Null)));
@@ -89,7 +81,7 @@ pub fn request_tokens(
     };
     let tokens: TokenResponse = serde_json::from_value(body).map_err(|error| {
         Failure::local(
-            "auth",
+            ErrorCode::Auth,
             format!("The token endpoint's answer is not a token response: {error}"),
         )
     })?;

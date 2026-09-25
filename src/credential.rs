@@ -3,7 +3,7 @@ use std::env;
 use ureq::Agent;
 
 use crate::discovery;
-use crate::failure::Failure;
+use crate::failure::{ErrorCode, Failure};
 use crate::oauth;
 use crate::store::{self, SignIn};
 
@@ -53,7 +53,7 @@ pub fn find(host: &str) -> Result<Option<Credential>, Failure> {
 pub fn require(host: &str) -> Result<Credential, Failure> {
     find(host)?.ok_or_else(|| {
         Failure::local(
-            "not-signed-in",
+            ErrorCode::NotSignedIn,
             "No credential. Run `compliance login`, or set COMPLIANCE_TOKEN to a Personal token.",
         )
     })
@@ -88,7 +88,7 @@ pub fn refresh(agent: &Agent, host: &str, sign_in: &SignIn) -> Result<SignIn, Fa
 
 fn sign_in_ended(host: &str) -> Failure {
     Failure::local(
-        "not-signed-in",
+        ErrorCode::NotSignedIn,
         format!("The sign-in for {host} has ended. Run `compliance login` to sign in again."),
     )
 }

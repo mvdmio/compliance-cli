@@ -6,20 +6,24 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
-use support::{DESCRIPTION_PATH, FakeServer, Recorded, Reply, Run, compliance, fixture};
+use support::{
+    DESCRIPTION_PATH, FakeServer, Recorded, Reply, Run, TOKEN, body_json, compliance_with_token,
+    fixture,
+};
 use tempfile::TempDir;
 
-const TOKEN: &str = "cmp_pat_test";
 const PART_SIZE: u64 = 4;
 const CREATED: &str = "{\"id\":\"e1\",\"title\":\"T\"}";
 
-/// What the fake Upload link does to one `PUT ?offset=N`, until `times` runs out.
+/// What the fake Upload link does to one `PUT`, until `times` runs out.
 #[derive(Clone, Copy)]
 enum Fault {
     /// Answers 503 and keeps nothing, as when the part was lost on the way.
     Unavailable,
     /// Keeps the part, then answers 409 with `bytesReceived`, as when the part arrived twice.
     Conflict,
+    /// Keeps the first half of the bytes and answers 503, as when the connection broke off midway.
+    Dropped,
 }
 
 struct Link {
@@ -31,7 +35,8 @@ struct Link {
 #[derive(Default)]
 struct Links {
     links: HashMap<String, Link>,
-    faults: HashMap<u64, (Fault, u32)>,
+    /// By the `PUT`'s offset: `None` for a whole-file `PUT`.
+    faults: HashMap<Option<u64>, (Fault, u32)>,
     max_bytes: Option<u64>,
 }
 
@@ -71,7 +76,7 @@ impl Host {
         }
     }
 
-    fn fault(&self, offset: u64, fault: Fault, times: u32) {
+    fn fault(&self, offset: Option<u64>, fault: Fault, times: u32) {
         self.links
             .lock()
             .unwrap()
@@ -90,11 +95,7 @@ impl Host {
     }
 
     fn run(&self, args: &[&str]) -> Run {
-        let url = self.server.url();
-        compliance(
-            args,
-            &[("COMPLIANCE_URL", &url), ("COMPLIANCE_TOKEN", TOKEN)],
-        )
+        compliance_with_token(&self.server, args)
     }
 
     fn requests(&self) -> Vec<Recorded> {
@@ -156,19 +157,28 @@ impl Links {
         let offset = request
             .form("offset")
             .map(|offset| offset.parse::<u64>().unwrap());
-        let fault = offset.and_then(|offset| {
-            let (fault, times) = self.faults.get_mut(&offset)?;
-            (*times > 0).then(|| {
-                *times -= 1;
-                *fault
-            })
-        });
+        let fault = (request.method == "PUT")
+            .then(|| self.faults.get_mut(&offset))
+            .flatten()
+            .and_then(|(fault, times)| {
+                (*times > 0).then(|| {
+                    *times -= 1;
+                    *fault
+                })
+            });
         let Some(link) = self.links.get_mut(token) else {
             return Reply::problem(404, "{\"status\":404}");
         };
         match (request.method.as_str(), finish, offset) {
             ("GET", false, None) => Reply::json(200, &status(link)),
             ("PUT", false, None) => {
+                if !link.bytes.is_empty() {
+                    return conflict(link);
+                }
+                if let Some(Fault::Dropped) = fault {
+                    link.bytes = request.body[..request.body.len() / 2].to_vec();
+                    return Reply::empty(503);
+                }
                 link.bytes = request.body.clone();
                 link.finished = true;
                 Reply::json(200, &status(link))
@@ -186,6 +196,11 @@ impl Links {
                     Some(Fault::Conflict) => {
                         link.bytes.extend_from_slice(&request.body);
                         conflict(link)
+                    }
+                    Some(Fault::Dropped) => {
+                        link.bytes
+                            .extend_from_slice(&request.body[..request.body.len() / 2]);
+                        Reply::empty(503)
                     }
                     None => {
                         link.bytes.extend_from_slice(&request.body);
@@ -221,10 +236,6 @@ fn conflict(link: &Link) -> Reply {
         409,
         &json!({ "status": 409, "bytesReceived": link.bytes.len() }).to_string(),
     )
-}
-
-fn body_json(request: &Recorded) -> Value {
-    serde_json::from_slice(&request.body).expect("a JSON body")
 }
 
 /// Each request as `METHOD path?query`.
@@ -311,7 +322,7 @@ fn a_file_larger_than_the_part_size_goes_in_parts_and_then_finishes() {
 fn no_request_to_the_upload_link_carries_the_credential() {
     let host = Host::start();
     let file = host.file("big.zip", BIG);
-    host.fault(4, Fault::Unavailable, 1);
+    host.fault(Some(4), Fault::Unavailable, 1);
 
     let run = host.run(&["evidence", "create", "--file", &file]);
 
@@ -327,10 +338,31 @@ fn no_request_to_the_upload_link_carries_the_credential() {
 }
 
 #[test]
-fn after_a_409_the_upload_reads_the_link_and_goes_on_from_the_bytes_received() {
+fn after_a_409_the_upload_goes_on_from_the_bytes_it_names() {
     let host = Host::start();
     let file = host.file("big.zip", BIG);
-    host.fault(4, Fault::Conflict, 1);
+    host.fault(Some(4), Fault::Conflict, 1);
+
+    let run = host.run(&["evidence", "create", "--file", &file]);
+
+    assert_eq!(run.code, 0, "{run:#?}");
+    assert_eq!(
+        lines(&host.link_requests()),
+        [
+            "PUT /uploads/t1?offset=0",
+            "PUT /uploads/t1?offset=4",
+            "PUT /uploads/t1?offset=8",
+            "POST /uploads/t1/finish",
+        ]
+    );
+    assert_eq!(host.received("t1"), BIG);
+}
+
+#[test]
+fn after_a_whole_file_put_breaks_off_the_upload_sends_the_rest_as_parts() {
+    let host = Host::start();
+    let file = host.file("small.pdf", b"%PDF");
+    host.fault(None, Fault::Dropped, 1);
 
     let run = host.run(&["evidence", "create", "--file", &file]);
 
@@ -339,22 +371,28 @@ fn after_a_409_the_upload_reads_the_link_and_goes_on_from_the_bytes_received() {
     assert_eq!(
         lines(&links),
         [
-            "PUT /uploads/t1?offset=0",
-            "PUT /uploads/t1?offset=4",
+            "PUT /uploads/t1",
             "GET /uploads/t1",
-            "PUT /uploads/t1?offset=8",
+            "PUT /uploads/t1?offset=2",
             "POST /uploads/t1/finish",
         ]
     );
-    assert_eq!(links[2].header("Accept"), Some("application/json"));
-    assert_eq!(host.received("t1"), BIG);
+    assert_eq!(links[1].header("Accept"), Some("application/json"));
+    assert_eq!(links[2].body, b"DF");
+    assert_eq!(
+        body_json(&links[3]),
+        json!({ "totalBytes": 4, "fileName": "small.pdf" })
+    );
+    assert_eq!(host.received("t1"), b"%PDF");
+    assert!(host.finished("t1"));
+    assert_eq!(host.requests().pop().unwrap().path(), "/api/v1/evidence");
 }
 
 #[test]
 fn after_a_dropped_part_the_upload_resumes_and_completes() {
     let host = Host::start();
     let file = host.file("big.zip", BIG);
-    host.fault(4, Fault::Unavailable, 2);
+    host.fault(Some(4), Fault::Unavailable, 2);
 
     let run = host.run(&["evidence", "create", "--file", &file]);
 
@@ -380,7 +418,7 @@ fn after_a_dropped_part_the_upload_resumes_and_completes() {
 fn an_upload_gives_up_after_five_tries_in_a_row_without_progress() {
     let host = Host::start();
     let file = host.file("big.zip", BIG);
-    host.fault(4, Fault::Unavailable, u32::MAX);
+    host.fault(Some(4), Fault::Unavailable, u32::MAX);
 
     let run = host.run(&["evidence", "create", "--file", &file]);
 

@@ -1,14 +1,12 @@
-use std::fs;
 use std::str::FromStr;
 
 use ureq::http::Method;
 use ureq::http::uri::PathAndQuery;
 
 use crate::cli::ApiArgs;
-use crate::config;
-use crate::credential;
 use crate::failure::Failure;
 use crate::http::Client;
+use crate::request;
 use crate::response;
 
 /// `compliance api <method> <path>`: one raw call with the current credential.
@@ -20,10 +18,9 @@ pub fn run(args: ApiArgs) -> Result<(), Failure> {
             args.path
         )));
     }
-    let body = args.body.as_deref().map(json_body).transpose()?;
+    let body = args.body.as_deref().map(request::body_bytes).transpose()?;
 
-    let host = config::host();
-    let mut client = Client::new(host.clone(), credential::require(&host)?);
+    let mut client = Client::signed_in()?;
     let answer = client.send(&method, &args.path, body.as_deref())?;
     response::print_response(answer, args.out.as_deref())
 }
@@ -41,30 +38,4 @@ fn method(text: &str) -> Result<Method, Failure> {
             "Unknown method {text}. Use GET, POST, PUT, PATCH, DELETE, HEAD, or OPTIONS."
         ))),
     }
-}
-
-/// `--body`: inline JSON, or `@path` to read it from a file. It must parse, so a typo fails before the call.
-fn json_body(text: &str) -> Result<Vec<u8>, Failure> {
-    let bytes = body_text(text)?;
-    parse_body(&bytes)?;
-    Ok(bytes)
-}
-
-/// `--body` of a generated command, parsed.
-pub fn json_value(text: &str) -> Result<serde_json::Value, Failure> {
-    parse_body(&body_text(text)?)
-}
-
-fn body_text(text: &str) -> Result<Vec<u8>, Failure> {
-    match text.strip_prefix('@') {
-        Some(path) => {
-            fs::read(path).map_err(|error| Failure::local("file", format!("{path}: {error}")))
-        }
-        None => Ok(text.as_bytes().to_vec()),
-    }
-}
-
-fn parse_body(bytes: &[u8]) -> Result<serde_json::Value, Failure> {
-    serde_json::from_slice(bytes)
-        .map_err(|error| Failure::Usage(format!("--body is not valid JSON: {error}")))
 }

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::failure::Failure;
+use crate::failure::{ErrorCode, Failure};
 
 const FILE_NAME: &str = "credentials.json";
 const LOCK_WAIT: Duration = Duration::from_secs(5);
@@ -45,7 +45,7 @@ pub fn folder() -> Result<PathBuf, Failure> {
             .map(|dir| dir.join("compliance"))
             .ok_or_else(|| {
                 Failure::local(
-                    "config",
+                    ErrorCode::Config,
                     "Found no config folder for the stored sign-in. Set COMPLIANCE_CONFIG_DIR.",
                 )
             }),
@@ -161,7 +161,7 @@ fn read(path: &Path) -> Result<Credentials, Failure> {
     };
     serde_json::from_slice(&bytes).map_err(|error| {
         Failure::local(
-            "credentials",
+            ErrorCode::Credentials,
             format!(
                 "{} does not parse ({error}). Delete it and run `compliance login`.",
                 path.display()

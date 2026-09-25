@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use ureq::Agent;
 
-use crate::failure::Failure;
+use crate::failure::{ErrorCode, Failure};
 use crate::http;
 use crate::oauth::CLIENT_ID;
 
@@ -49,7 +49,7 @@ pub fn discover(agent: &Agent, host: &str) -> Result<AuthServer, Failure> {
     )?;
     let Some(auth) = metadata.authorization_servers.first() else {
         return Err(Failure::local(
-            "discovery",
+            ErrorCode::Discovery,
             format!("{host} names no authorization server in its Protected Resource Metadata."),
         ));
     };
@@ -70,24 +70,16 @@ pub fn discover(agent: &Agent, host: &str) -> Result<AuthServer, Failure> {
 }
 
 fn get_json<T: serde::de::DeserializeOwned>(agent: &Agent, url: &str) -> Result<T, Failure> {
-    let mut response = agent
-        .get(url)
-        .call()
-        .map_err(|error| http::transport_failure(url, error))?;
-    let status = response.status();
-    let bytes = response
-        .body_mut()
-        .read_to_vec()
-        .map_err(|error| http::transport_failure(url, error))?;
+    let (status, bytes) = http::read_answer(url, agent.get(url).call())?;
     if !status.is_success() {
         return Err(Failure::local(
-            "discovery",
+            ErrorCode::Discovery,
             format!("{url} answered {status}."),
         ));
     }
     serde_json::from_slice(&bytes).map_err(|error| {
         Failure::local(
-            "discovery",
+            ErrorCode::Discovery,
             format!("{url} is not the expected metadata: {error}"),
         )
     })

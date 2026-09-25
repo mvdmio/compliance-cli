@@ -52,6 +52,11 @@ impl Recorded {
     }
 }
 
+/// The JSON body of a request.
+pub fn body_json(request: &Recorded) -> Value {
+    serde_json::from_slice(&request.body).expect("a JSON body")
+}
+
 pub fn form_value(encoded: &str, name: &str) -> Option<String> {
     encoded.split('&').find_map(|pair| {
         let (key, value) = pair.split_once('=')?;
@@ -203,6 +208,20 @@ impl Run {
         serde_json::from_str(&self.stderr)
             .unwrap_or_else(|error| panic!("stderr is not JSON ({error}): {self:#?}"))
     }
+}
+
+/// The Personal token the tests pass in `COMPLIANCE_TOKEN`.
+pub const TOKEN: &str = "cmp_pat_test";
+
+/// Runs `compliance <args>` against `server` with the Personal token `TOKEN`.
+pub fn compliance_with_token(server: &FakeServer, args: &[&str]) -> Run {
+    compliance(
+        args,
+        &[
+            ("COMPLIANCE_URL", &server.url()),
+            ("COMPLIANCE_TOKEN", TOKEN),
+        ],
+    )
 }
 
 /// Runs `compliance <args>` with only the given `COMPLIANCE_*` variables set.

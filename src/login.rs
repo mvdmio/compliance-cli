@@ -3,7 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
+use percent_encoding::{percent_decode_str, utf8_percent_encode};
 use serde::Deserialize;
 use serde_json::json;
 use ureq::Agent;
@@ -13,10 +13,11 @@ use crate::cli::LoginArgs;
 use crate::config;
 use crate::credential::Credential;
 use crate::discovery::{self, AuthServer};
-use crate::failure::Failure;
+use crate::failure::{ErrorCode, Failure};
 use crate::http::{self, Client};
 use crate::oauth::{self, SCOPE};
 use crate::output;
+use crate::request::UNRESERVED;
 use crate::store::{self, SignIn};
 
 const BROWSER_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -25,13 +26,6 @@ const DEFAULT_DEVICE_INTERVAL: u64 = 5;
 /// RFC 8628 §3.5: `slow_down` adds 5 seconds to the polling interval.
 const SLOW_DOWN_STEP: u64 = 5;
 const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
-
-/// RFC 3986 unreserved characters stay as they are; everything else is percent-encoded.
-const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
 
 /// `compliance login`: signs in through Auth, in the browser or with a device code, and stores the sign-in.
 pub fn run(args: LoginArgs) -> Result<(), Failure> {
@@ -52,23 +46,27 @@ pub fn run(args: LoginArgs) -> Result<(), Failure> {
 
     let user = sign_in.user.clone();
     let mut client = Client::new(host.clone(), Credential::AgentConnection(sign_in));
-    let accounts = accounts::fetch(&mut client)?;
+    let account = accounts::current(&mut client)?;
     output::print_json(&json!({
         "status": "logged_in",
         "host": host,
         "user": user,
-        "account": accounts.current,
+        "account": account,
     }));
     Ok(())
 }
 
 /// The authorization code flow with PKCE through a loopback redirect (RFC 8252). `None` when no browser opens.
 fn browser_sign_in(agent: &Agent, server: &AuthServer) -> Result<Option<SignIn>, Failure> {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|error| Failure::local("login", format!("Cannot listen on 127.0.0.1: {error}")))?;
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| {
+        Failure::local(
+            ErrorCode::Login,
+            format!("Cannot listen on 127.0.0.1: {error}"),
+        )
+    })?;
     let port = listener
         .local_addr()
-        .map_err(|error| Failure::local("login", error.to_string()))?
+        .map_err(|error| Failure::local(ErrorCode::Login, error.to_string()))?
         .port();
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
     let verifier = oauth::random_text(32);
@@ -118,7 +116,7 @@ fn can_open_browser() -> bool {
 fn wait_for_code(listener: &TcpListener, state: &str) -> Result<String, Failure> {
     listener
         .set_nonblocking(true)
-        .map_err(|error| Failure::local("login", error.to_string()))?;
+        .map_err(|error| Failure::local(ErrorCode::Login, error.to_string()))?;
     let deadline = Instant::now() + BROWSER_TIMEOUT;
     while Instant::now() < deadline {
         match listener.accept() {
@@ -128,11 +126,11 @@ fn wait_for_code(listener: &TcpListener, state: &str) -> Result<String, Failure>
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => thread::sleep(ACCEPT_POLL),
-            Err(error) => return Err(Failure::local("login", error.to_string())),
+            Err(error) => return Err(Failure::local(ErrorCode::Login, error.to_string())),
         }
     }
     Err(Failure::local(
-        "login-timeout",
+        ErrorCode::LoginTimeout,
         "No sign-in arrived within 5 minutes. Run `compliance login` again.",
     ))
 }
@@ -174,7 +172,7 @@ fn answer_callback(stream: TcpStream, state: &str) -> Option<Result<String, Fail
         .into_failure())
     } else {
         parameter("code")
-            .ok_or_else(|| Failure::local("login", "The sign-in answer carried no code."))
+            .ok_or_else(|| Failure::local(ErrorCode::Login, "The sign-in answer carried no code."))
     };
     match &result {
         Ok(_) => respond(
@@ -207,7 +205,7 @@ fn respond(mut stream: &TcpStream, status: &str, text: &str) {
 fn with_query(url: &str, parameters: &[(&str, &str)]) -> String {
     let query = parameters
         .iter()
-        .map(|(name, value)| format!("{name}={}", utf8_percent_encode(value, QUERY_VALUE)))
+        .map(|(name, value)| format!("{name}={}", utf8_percent_encode(value, UNRESERVED)))
         .collect::<Vec<_>>()
         .join("&");
     let separator = if url.contains('?') { '&' } else { '?' };
@@ -242,7 +240,7 @@ fn device_sign_in(agent: &Agent, server: &AuthServer) -> Result<SignIn, Failure>
         .map_err(oauth::OAuthError::into_failure)?;
     let device: DeviceAuthorization = serde_json::from_value(body).map_err(|error| {
         Failure::local(
-            "auth",
+            ErrorCode::Auth,
             format!("The device endpoint's answer is not a device authorization: {error}"),
         )
     })?;
@@ -264,7 +262,7 @@ fn device_sign_in(agent: &Agent, server: &AuthServer) -> Result<SignIn, Failure>
         thread::sleep(Duration::from_secs(interval));
         if Instant::now() >= deadline {
             return Err(Failure::local(
-                "expired-token",
+                ErrorCode::ExpiredToken,
                 "The device code expired before the sign-in finished. Run `compliance login` again.",
             ));
         }

@@ -17,13 +17,12 @@ pub fn run() -> Result<(), Failure> {
             "credential": null,
             "user": null,
             "account": null,
-            "accounts": [],
         }));
         return Ok(());
     };
 
     let mut client = Client::new(host.clone(), credential);
-    let accounts = accounts::fetch(&mut client)?;
+    let account = accounts::current(&mut client)?;
     let credential = client.credential();
     // A Personal token carries no `id_token`, so only a stored sign-in knows the User.
     let user = match credential {
@@ -35,8 +34,7 @@ pub fn run() -> Result<(), Failure> {
         "signedIn": true,
         "credential": { "kind": credential.kind(), "source": credential.source() },
         "user": user,
-        "account": accounts.current,
-        "accounts": accounts.items,
+        "account": account,
     }));
     Ok(())
 }

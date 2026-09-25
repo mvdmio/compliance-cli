@@ -23,6 +23,7 @@ CI runs format, lint, and test on Linux, macOS, and Windows for every push and p
 - `src/oauth.rs`: token, device, and revocation requests, and PKCE.
 - `src/http.rs`: the HTTP client (User-Agent, bearer, 429 retry, refresh before expiry and on a 401).
 - `src/response.rs`: turns an API answer into output.
+- `src/request.rs`: URL encoding and the `--body` option, shared by the commands that build a request.
 - `src/description.rs`: the API's OpenAPI description, cached per host for an hour and fetched again for an
   unknown command.
 - `src/openapi.rs`: reads operations, parameters, and body fields out of the description.

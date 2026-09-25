@@ -48,8 +48,9 @@ A command that fails with `not-signed-in` needs `compliance login`.
 
 ## Commands
 
-Every REST operation is a command: `compliance <group> <action>`, both in kebab-case. The operation `risks.accept`
-is `compliance risks accept <id>`.
+Every REST operation is a command: `compliance <group> <action>`, both in kebab-case, from its `operationId`
+`<group>.<action>`. The operation `risks.accept` is `compliance risks accept <id>`. The group comes from the
+`operationId`, not the tag: `frameworks.start-gap-analysis` is `compliance frameworks start-gap-analysis`.
 
 - `compliance --help` lists the groups. `compliance <group> --help` lists its actions.
   `compliance <group> <action> --help` shows what the operation does and every argument with its type. Read it
@@ -116,7 +117,7 @@ compliance chat send "Which risks are still open?"
 ```
 
 It waits until the Assistant's turn ends and prints
-`{"conversationId","turnState","lastError","queued","messages":[…]}`. Each message has `role`, `sender`, the
+`{"conversationId","lastError","queued","messages":[…]}`. Each message has `role`, `sender`, the
 markdown `text`, and `toolActivity`.
 
 - **Continue** with `--conversation <conversationId>`, always the id from the last output: it changes when the

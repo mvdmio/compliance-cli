@@ -2,10 +2,11 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 
 use ureq::Agent;
-use ureq::http::{HeaderMap, Method, Request, Response, header};
+use ureq::http::{HeaderMap, Method, Request, Response, StatusCode, header};
 
+use crate::config;
 use crate::credential::{self, Credential};
-use crate::failure::Failure;
+use crate::failure::{ErrorCode, Failure};
 
 const USER_AGENT: &str = concat!("compliance-cli/", env!("CARGO_PKG_VERSION"));
 const MAX_RATE_LIMIT_RETRIES: usize = 3;
@@ -25,11 +26,28 @@ pub fn agent() -> Agent {
 /// A request that never got an answer: `config` for an address that does not parse, else `network`.
 pub fn transport_failure(url: &str, error: ureq::Error) -> Failure {
     match error {
-        ureq::Error::BadUri(_) | ureq::Error::Http(_) => {
-            Failure::local("config", format!("{url} is not a valid address: {error}"))
-        }
-        _ => Failure::local("network", format!("{url}: {error}")),
+        ureq::Error::BadUri(_) | ureq::Error::Http(_) => Failure::local(
+            ErrorCode::Config,
+            format!("{url} is not a valid address: {error}"),
+        ),
+        _ => Failure::local(ErrorCode::Network, format!("{url}: {error}")),
     }
+}
+
+/// The status and whole body of the answer `result` holds for `url`. No answer, or a body that broke off, is
+/// `transport_failure`.
+pub fn read_answer(
+    url: &str,
+    result: Result<Response<ureq::Body>, ureq::Error>,
+) -> Result<(StatusCode, Vec<u8>), Failure> {
+    let mut response = result.map_err(|error| transport_failure(url, error))?;
+    let bytes = response
+        .body_mut()
+        .with_config()
+        .limit(u64::MAX)
+        .read_to_vec()
+        .map_err(|error| transport_failure(url, error))?;
+    Ok((response.status(), bytes))
 }
 
 /// Calls one Compliance host with one credential. A stored sign-in is refreshed when its access token is about to
@@ -47,6 +65,13 @@ impl Client {
             host,
             credential,
         }
+    }
+
+    /// A client for the configured host with the credential in use; `not-signed-in` without one.
+    pub fn signed_in() -> Result<Self, Failure> {
+        let host = config::host();
+        let credential = credential::require(&host)?;
+        Ok(Client::new(host, credential))
     }
 
     pub fn host(&self) -> &str {
@@ -118,21 +143,18 @@ impl Client {
             header::AUTHORIZATION,
             format!("Bearer {}", self.credential.bearer()),
         );
-        let result = match json_body {
+        match json_body {
             Some(body) => request
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(body)
-                .map(|request| self.agent.run(request)),
-            None => request.body(()).map(|request| self.agent.run(request)),
-        };
-        result
-            .map_err(|error| {
-                Failure::local(
-                    "config",
-                    format!("COMPLIANCE_URL gives {url}, which is not a valid address: {error}"),
-                )
-            })?
-            .map_err(|error| Failure::local("network", format!("{url}: {error}")))
+                .map_err(ureq::Error::from)
+                .and_then(|request| self.agent.run(request)),
+            None => request
+                .body(())
+                .map_err(ureq::Error::from)
+                .and_then(|request| self.agent.run(request)),
+        }
+        .map_err(|error| transport_failure(url, error))
     }
 }
 

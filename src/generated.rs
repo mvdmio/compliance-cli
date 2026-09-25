@@ -10,11 +10,11 @@ use serde_json::{Number, Value};
 
 use crate::openapi::{Kind, Operation, Parameter, Schema, kebab_case};
 
-/// Option names every generated command keeps for itself.
-const GLOBAL_OPTIONS: [&str; 4] = ["help", "body", "out", "file"];
 pub const BODY: &str = "body";
 pub const OUT: &str = "out";
 pub const FILE: &str = "file";
+/// Option names no parameter may take, even on a command without that option.
+const GLOBAL_OPTIONS: [&str; 4] = ["help", BODY, OUT, FILE];
 
 pub fn path_id(parameter: &Parameter) -> String {
     format!("path:{}", parameter.name)
@@ -275,17 +275,16 @@ fn action(operation: &Operation) -> Command {
                 .help("The whole JSON body, inline or read from a file with @path. Field options win over the same keys in it."),
         );
     }
+    if !operation.download {
+        return command;
+    }
     command.arg(
         Arg::new(OUT)
             .long(OUT)
             .value_name("PATH")
             .value_parser(clap::value_parser!(PathBuf))
-            .required(operation.download)
-            .help(if operation.download {
-                "Write the downloaded file here and print a summary. Required: the answer is not JSON."
-            } else {
-                "Write the response body to this file and print a summary instead."
-            }),
+            .required(true)
+            .help("Write the downloaded file here and print a summary. Required: the answer is not JSON."),
     )
 }
 

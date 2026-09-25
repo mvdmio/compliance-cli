@@ -2,7 +2,6 @@
 
 use std::env;
 use std::fs;
-use std::io::Read;
 use std::path::PathBuf;
 use std::process;
 use std::time::{Duration, SystemTime};
@@ -10,7 +9,7 @@ use std::time::{Duration, SystemTime};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::Value;
 
-use crate::failure::Failure;
+use crate::failure::{ErrorCode, Failure};
 use crate::http;
 
 const PATH: &str = "/openapi/v1.json";
@@ -88,26 +87,19 @@ fn cache_file(host: &str) -> Option<PathBuf> {
 /// GETs the description without a credential, and caches it.
 fn fetch(host: &str) -> Result<Value, Failure> {
     let url = format!("{host}{PATH}");
-    let response = http::agent()
-        .get(&url)
-        .call()
-        .map_err(|error| http::transport_failure(&url, error))?;
-    let status = response.status().as_u16();
+    let (status, bytes) = http::read_answer(&url, http::agent().get(&url).call())?;
     let unusable = |why: String| {
         Failure::local(
-            "network",
+            ErrorCode::Network,
             format!("Could not read the API description at {url}: {why}"),
         )
     };
     if status != 200 {
-        return Err(unusable(format!("the server answered {status}.")));
+        return Err(unusable(format!(
+            "the server answered {}.",
+            status.as_u16()
+        )));
     }
-    let mut bytes = Vec::new();
-    response
-        .into_body()
-        .into_reader()
-        .read_to_end(&mut bytes)
-        .map_err(|error| unusable(error.to_string()))?;
     let document = read_json(&bytes)
         .ok_or_else(|| unusable("it is not an OpenAPI description.".to_string()))?;
     if let Some(path) = cache_file(host) {
