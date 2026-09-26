@@ -1,6 +1,6 @@
 # 01 — Launcher and E2E suite with the status Scenario
 
-Status: pending
+Status: done
 
 ## What to build
 
@@ -88,18 +88,49 @@ Projects: compliance-cli (`cargo fmt --check`, `cargo clippy --all-targets -- -D
 
 ## Acceptance criteria
 
-- [ ] `scripts/test-bed.sh` prints exactly one JSON line with `url` and `token` on stdout, and
+- [x] `scripts/test-bed.sh` prints exactly one JSON line with `url` and `token` on stdout, and
       `COMPLIANCE_URL=<url> COMPLIANCE_TOKEN=<token> compliance status` then exits 0.
-- [ ] Ctrl-C or SIGTERM to the Launcher leaves no container, no Compliance process, and no data folder behind.
-- [ ] Two Launchers run at the same time without colliding, and neither touches `mvdmio-dev-postgres`.
-- [ ] The Test-bed's Protected Resource Metadata and configuration name no production Auth address.
-- [ ] `cargo test` lists the `status` Scenario as ignored and needs no .NET, Docker, or Postgres.
-- [ ] `cargo test --test e2e -- --ignored` with no `COMPLIANCE_E2E_*` set starts a Test-bed, passes the `status`
+- [x] Ctrl-C or SIGTERM to the Launcher leaves no container, no Compliance process, and no data folder behind.
+- [x] Two Launchers run at the same time without colliding, and neither touches `mvdmio-dev-postgres`.
+- [x] The Test-bed's Protected Resource Metadata and configuration name no production Auth address.
+- [x] `cargo test` lists the `status` Scenario as ignored and needs no .NET, Docker, or Postgres.
+- [x] `cargo test --test e2e -- --ignored` with no `COMPLIANCE_E2E_*` set starts a Test-bed, passes the `status`
       Scenario, and leaves no Test-bed behind when it ends.
-- [ ] With `COMPLIANCE_E2E_URL` and `COMPLIANCE_E2E_TOKEN` pointing at a running Launcher, the same command passes
+- [x] With `COMPLIANCE_E2E_URL` and `COMPLIANCE_E2E_TOKEN` pointing at a running Launcher, the same command passes
       without starting a second Test-bed.
-- [ ] A run writes a timing report under `target/e2e/` with one entry per command: Scenario, arguments, exit code,
+- [x] A run writes a timing report under `target/e2e/` with one entry per command: Scenario, arguments, exit code,
       milliseconds.
-- [ ] `AGENTS.md` documents the Launcher, the E2E suite command, the three variables, and that `cargo test` never
+- [x] `AGENTS.md` documents the Launcher, the E2E suite command, the three variables, and that `cargo test` never
       runs the E2E suite.
-- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` pass.
+- [x] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` pass.
+
+## Outcome
+
+- `scripts/test-bed.sh` is the Launcher. It builds `mvdmio.Compliance.Web` under a per-checkout lock
+  (`obj/.test-bed-build.lock`, a `mkdir` lock with a stale-PID check, portable to macOS), copies the build output
+  into its own temp folder, and runs that copy with `dotnet exec` from the project folder, in Development. This
+  replaces a literal `dotnet run`: a second Launcher's rebuild can then never overwrite the files a running server
+  has loaded.
+- The overrides are environment variables, not command-line configuration: `WebApplicationBase` builds the host
+  without `args`, so command-line configuration never reaches it. `urls` and `Hosting:BaseUrl` are overridden too,
+  so the listen address and the Browser handoff links name the Test-bed. `IdentityServer:BaseUrl` is
+  `http://localhost:13001`, Auth's own Development address.
+- The Legal Acceptance and Personal token rows are written through `psql` inside the container, with the hash
+  computed by Postgres (`sha256(convert_to(token, 'UTF8'))`), so the host needs no `psql`.
+- `--until-stdin-closes` makes the Launcher stop when its stdin reaches end of file. The suite holds that pipe for
+  the whole test process, so a killed test process (checked with SIGKILL) still leaves nothing behind.
+- The build needs `bun` (the Web project's `BunInstall` target), and `AGENTS.md` lists it. Step 06's workflow must
+  install it.
+- Drift from the Step: `compliance status` prints `"user": null` for a Personal token (it carries no `id_token`),
+  so the `status` Scenario checks that `user` is null rather than naming the seeded User. It checks the host, the
+  credential (`personal-token`, `COMPLIANCE_TOKEN`), and Account 1 as current.
+- One limit, `TEST_BED_BOOT_TIMEOUT` (default 1800 seconds), covers the build lock wait, the build, and the boot
+  together. A lock with no PID that is over a minute old counts as stale.
+- `tests/support/mod.rs` is reused through `#[path]` and gained `Run::from_output`, which the Fake-host helper and
+  the Scenario share. A run a signal ended now has code -1 instead of panicking, so its timing is still recorded.
+  `Cargo.toml` needed no `[[test]]` entry.
+- The timing report finds the target folder by Cargo's `CACHEDIR.TAG`, so a `--target <triple>` build still writes
+  to `target/e2e/`.
+- Checked by hand: two Launchers side by side, cleanup after SIGTERM and Ctrl-C, the Protected Resource Metadata
+  naming only `http://localhost:13001`, the suite starting its own Test-bed and reusing one through
+  `COMPLIANCE_E2E_*`, one variable alone failing clearly, and the timing report `target/e2e/run-<start ms>.json`.

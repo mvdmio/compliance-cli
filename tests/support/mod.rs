@@ -199,6 +199,15 @@ pub struct Run {
 }
 
 impl Run {
+    /// What a finished run printed. A run a signal ended has code -1.
+    pub fn from_output(output: std::process::Output) -> Self {
+        Run {
+            code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8(output.stdout).expect("UTF-8 stdout"),
+            stderr: String::from_utf8(output.stderr).expect("UTF-8 stderr"),
+        }
+    }
+
     pub fn stdout_json(&self) -> Value {
         serde_json::from_str(&self.stdout)
             .unwrap_or_else(|error| panic!("stdout is not JSON ({error}): {self:#?}"))
@@ -234,11 +243,7 @@ pub fn compliance_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
     let output = command(dir, args, env, config.path())
         .output()
         .expect("run the compliance binary");
-    Run {
-        code: output.status.code().expect("an exit code"),
-        stdout: String::from_utf8(output.stdout).expect("UTF-8 stdout"),
-        stderr: String::from_utf8(output.stderr).expect("UTF-8 stderr"),
-    }
+    Run::from_output(output)
 }
 
 /// The binary with no display, so `login` never opens a real browser, and with `config` as the config folder

@@ -8,6 +8,8 @@ Rust crate `compliance-cli`, binary `compliance`: a command-line tool for the Co
 - Test: `cargo test`
 - Lint: `cargo clippy --all-targets -- -D warnings`
 - Format: `cargo fmt` (CI runs `cargo fmt --check`)
+- E2E suite: `cargo test --test e2e -- --ignored` (see Test-bed below)
+- Launcher: `scripts/test-bed.sh` (see Test-bed below)
 
 CI runs format, lint, and test on Linux, macOS, and Windows for every push and pull request.
 
@@ -42,6 +44,27 @@ CI runs format, lint, and test on Linux, macOS, and Windows for every push and p
 - `tests/`: tests that run the built binary against in-process fake Compliance and Auth hosts (`tests/support`).
   The tests never open a real browser: they run without a display, and the browser test on Linux puts a fake
   `xdg-open` first on `PATH`.
+- `scripts/test-bed.sh`: the Launcher, which starts a Test-bed.
+- `tests/e2e/`: the E2E suite (`main.rs`: the Scenarios; `test_bed.rs`: finding or starting the Test-bed and
+  running the binary on it; `timing.rs`: the timing report under `target/e2e/`).
+
+## Test-bed
+
+A Test-bed is a real Compliance built from `mvdmio-suite`, with its own throwaway Postgres container and data folder,
+and a Personal token for seed user 1 on account 1. It needs Docker, the .NET SDK, `bun`, and `curl`, on Linux or
+macOS.
+
+- `scripts/test-bed.sh` builds and starts one, prints one JSON line `{"url": "...", "token": "..."}` on stdout, and
+  runs in the foreground. Ctrl-C or SIGTERM stops Compliance, removes the container, and deletes the folder. Put the
+  two values in `COMPLIANCE_URL` and `COMPLIANCE_TOKEN` to run commands against it. Several can run side by side.
+- `MVDMIO_SUITE_DIR`: the `mvdmio-suite` checkout the Launcher builds, by default `../mvdmio-suite` next to this repo.
+  Set it in a worktree, where that default path does not exist.
+- `TEST_BED_BOOT_TIMEOUT`: the seconds the Launcher allows for the build lock, the build, and the boot together
+  (default 1800).
+- `cargo test --test e2e -- --ignored` runs the E2E suite. With `COMPLIANCE_E2E_URL` and `COMPLIANCE_E2E_TOKEN` set
+  (both or neither) it uses that Test-bed; with neither, it runs the Launcher itself and stops it when it ends.
+- Plain `cargo test` never runs the E2E suite: it lists its Scenarios as ignored and needs no .NET, Docker, or
+  Postgres.
 
 ## Releases
 
