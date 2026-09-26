@@ -1,6 +1,6 @@
 # 03 — Upload and chat Scenarios
 
-Status: pending
+Status: done
 
 ## What to build
 
@@ -37,3 +37,25 @@ Projects: compliance-cli (`cargo fmt --check`, `cargo clippy --all-targets -- -D
 - [ ] `cargo test --test e2e -- --ignored` passes every Scenario so far against a fresh Test-bed.
 - [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` pass, with the new
       Scenarios listed as ignored.
+
+## Outcome
+
+- `tests/e2e/smoke.rs` gains three Scenarios: `file_to_evidence_in_one_request` (a 4 KiB file),
+  `file_to_evidence_in_parts` (25 MiB + 1 KiB, over the 25 MiB `partSize`), and `chat_send`. The uploads run
+  `evidence create --file <path> --title "E2E smoke Evidence"`: the live `evidence.create` requires `title` beside
+  the upload (422 without it). Each checks exit 0 and a non-empty `id`.
+- `chat_send` checks exit 0, a non-empty `conversationId`, and a message with `role` `assistant`. Drift from the
+  Step: `chat send` prints no `turnState` (it prints `conversationId`, `lastError`, `queued`, and `messages`, and
+  only once the read answers `idle`), so exit 0 is the idle check. A problem with `status` 402 fails with a message
+  that says the seeded Assistant allowance ran out and that this is not a CLI failure.
+- Drift from the Footprint and the Spec: the seed gives Account 1 no included Assistant funds, so on a fresh
+  Test-bed `chat send` answered 402 `allowance-exhausted` from the first Turn. The Launcher
+  (`scripts/test-bed.sh`) now writes a third row after the Legal Acceptance and the Personal token: a
+  `compliance.assistant_allowances` row for Account 1 with 100 USD of extra (an upsert on the account). The
+  Spec's "inserts two rows" and "the seeded included funds have run out" are now out of date; the Step that writes
+  the docs should name the third row.
+- The part-sized file follows `ImportUploadStagingService.PartSizeBytes` in `mvdmio-suite` by hand: the Scenario
+  checks only exit 0 and an `id`, so it cannot see whether the CLI really sent parts.
+- `main.rs` needed no change.
+- A run against a fresh Test-bed (`cargo test --test e2e -- --ignored`, no `COMPLIANCE_E2E_*`, with
+  `MVDMIO_SUITE_DIR` set, since this worktree has no sibling `mvdmio-suite`) passed all eight Scenarios.

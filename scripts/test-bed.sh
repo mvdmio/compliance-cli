@@ -206,7 +206,9 @@ until curl --silent --fail --output /dev/null "$url/openapi/v1.json"; do
    sleep 1
 done
 
-# Every Development boot truncates and reseeds, so the Legal Acceptance and the Personal token are written here.
+# Every Development boot truncates and reseeds, so the Legal Acceptance, the Personal token, and the Assistant
+# allowance are written here. The seed leaves Account 1 no included Assistant funds, so the allowance gets 100 USD of
+# extra, which scripted Turns spend.
 # The token is PersonalTokenSecret's shape: the prefix, then 32 random bytes in base64url without padding; the row
 # keeps only the SHA-256 of its UTF-8 bytes.
 token="mvdm_pat_$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n')"
@@ -218,9 +220,13 @@ ON CONFLICT (account_id) DO NOTHING;
 
 INSERT INTO auth.personal_tokens (user_id, name, secret_hash, account_id, expires_at)
 VALUES (1, 'Test-bed', sha256(convert_to(:'token', 'UTF8')), 1, NULL);
+
+INSERT INTO compliance.assistant_allowances (account_id, included_period_key, extra_usd)
+VALUES (1, 'comp:' || to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 100)
+ON CONFLICT (account_id) DO UPDATE SET extra_usd = EXCLUDED.extra_usd;
 SQL
 then
-   fail "writing the Legal Acceptance and Personal token failed" "$bed_dir/seed.log"
+   fail "writing the seed rows failed" "$bed_dir/seed.log"
 fi
 
 say "ready; Ctrl-C stops it"
