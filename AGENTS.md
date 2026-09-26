@@ -13,7 +13,8 @@ Rust crate `compliance-cli`, binary `compliance`: a command-line tool for the Co
 
 CI runs format, lint, and test on Linux, macOS, and Windows for every push and pull request.
 The E2E suite runs nightly (and on manual dispatch) in `.github/workflows/e2e.yml`, which needs the
-`MVDMIO_SUITE_TOKEN` secret (read-only access to `mvdmio-suite`), set up once by a person. GitHub turns the schedule
+`MVDMIO_SUITE_DEPLOY_KEY` secret: the private half of the read-only deploy key "compliance-cli E2E (read-only)" on
+`mvdmio-suite`, set up once by a person. GitHub turns the schedule
 off after 60 days without repository activity; re-enable it in the Actions tab.
 
 ## Layout

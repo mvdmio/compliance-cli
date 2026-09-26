@@ -20,12 +20,12 @@ jobs:
       GIT_LFS_SKIP_SMUDGE: "1"
       MVDMIO_SUITE_DIR: ${{ github.workspace }}/mvdmio-suite
     steps:
-      - name: Check the MVDMIO_SUITE_TOKEN secret
+      - name: Check the MVDMIO_SUITE_DEPLOY_KEY secret
         env:
-          MVDMIO_SUITE_TOKEN: ${{ secrets.MVDMIO_SUITE_TOKEN }}
+          MVDMIO_SUITE_DEPLOY_KEY: ${{ secrets.MVDMIO_SUITE_DEPLOY_KEY }}
         run: |
-          if [ -z "$MVDMIO_SUITE_TOKEN" ]; then
-            echo "::error::The MVDMIO_SUITE_TOKEN secret is not set: add a read-only token for mvdmio-suite."
+          if [ -z "$MVDMIO_SUITE_DEPLOY_KEY" ]; then
+            echo "::error::The MVDMIO_SUITE_DEPLOY_KEY secret is not set: add the private half of a read-only deploy key on mvdmio-suite."
             exit 1
           fi
       - uses: actions/checkout@v4
@@ -34,7 +34,7 @@ jobs:
         with:
           repository: michielvandermeer/mvdmio-suite
           ref: master
-          token: ${{ secrets.MVDMIO_SUITE_TOKEN }}
+          ssh-key: ${{ secrets.MVDMIO_SUITE_DEPLOY_KEY }}
           path: mvdmio-suite
           lfs: false
       # mvdmio-suite pins no SDK; its Web project targets net10.0.
