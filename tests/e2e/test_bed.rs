@@ -132,9 +132,14 @@ impl Scenario {
 
     /// Runs `compliance <args>` against the Test-bed with its Personal token, and records the time it took.
     pub fn run(&self, args: &[&str]) -> Run {
+        self.run_with_token(args, &self.test_bed.token)
+    }
+
+    /// Runs `compliance <args>` against the Test-bed with `token` in place of its Personal token.
+    pub fn run_with_token(&self, args: &[&str], token: &str) -> Run {
         let env = [
             ("COMPLIANCE_URL", self.test_bed.url.as_str()),
-            ("COMPLIANCE_TOKEN", self.test_bed.token.as_str()),
+            ("COMPLIANCE_TOKEN", token),
         ];
         // The config folder is also the working folder, so a file a command writes stays inside the Scenario.
         let folder = self.config.path();

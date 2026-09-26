@@ -1,6 +1,6 @@
 # 02 — Account, api, write, and bad-token Scenarios
 
-Status: pending
+Status: done
 
 ## What to build
 
@@ -32,12 +32,34 @@ Projects: compliance-cli (`cargo fmt --check`, `cargo clippy --all-targets -- -D
 
 ## Acceptance criteria
 
-- [ ] The accounts Scenario lists both Accounts, switches to 2 and back to 1, and the token is on Account 1 after
+- [x] The accounts Scenario lists both Accounts, switches to 2 and back to 1, and the token is on Account 1 after
       the Scenario ends, pass or fail.
-- [ ] The api Scenario passes a GET with exit 0, and a 404 with exit 1 and problem+json details on stderr.
-- [ ] The write Scenario creates a record through a generated command with `--body` and gets its `id` back.
-- [ ] The bad-token Scenario gets exit 1 and JSON on stderr.
-- [ ] `cargo test --test e2e -- --ignored` passes every Scenario so far against a fresh Test-bed, and each command
+- [x] The api Scenario passes a GET with exit 0, and a 404 with exit 1 and problem+json details on stderr.
+- [x] The write Scenario creates a record through a generated command with `--body` and gets its `id` back.
+- [x] The bad-token Scenario gets exit 1 and JSON on stderr.
+- [x] `cargo test --test e2e -- --ignored` passes every Scenario so far against a fresh Test-bed, and each command
       appears in the timing report.
-- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` pass, with the new
+- [x] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` pass, with the new
       Scenarios listed as ignored.
+
+## Outcome
+
+- `tests/e2e/smoke.rs` holds the smoke Scenarios: `status` (moved from `main.rs`), `accounts`, `api`,
+  `generated_write_with_body`, and `bad_token`. `main.rs` now only declares the modules.
+- `accounts` checks that `accounts list` names Accounts 1 and 2 with 1 current, then that `accounts switch 2`
+  answers with 2 current. A drop guard runs `accounts switch 1` whatever happens. It asserts on the answer only when
+  nothing panicked, because a second panic while unwinding would abort the run; in a failing Scenario a failed
+  switch back is printed on stderr instead. Checked by hand with a forced panic after the switch: the token was
+  back on Account 1.
+- `api` uses `GET /api/v1/risks`, and `GET /api/v1/risks/00000000-0000-0000-0000-000000000000` for the 404: exit
+  1, empty stdout, and the problem+json body on stderr with `status` 404 and a `type`.
+- The write Scenario is `risks create --body '{"title":…,"inherentLikelihood":2,"inherentImpact":3}'`, the three
+  fields `risks.create` names as required. It checks exit 0 and a non-empty `id`.
+- `bad_token` runs `status` with `mvdm_pat_` plus 43 base64url characters. Compliance answers 401 `unauthorized`,
+  and the CLI prints that on stderr with exit 1.
+- `Scenario::run_with_token` runs with another token; `Scenario::run` calls it with the Test-bed's token.
+- The `#[ignore = "…"]` text repeats on every Scenario: an attribute cannot take a `const`, and a wrapping macro
+  would stop `rustfmt` formatting the Scenario bodies.
+- Drift from the Footprint: none beyond moving `status` into `smoke.rs`, which the Footprint allowed.
+- A run against a fresh Test-bed (`cargo test --test e2e -- --ignored`, no `COMPLIANCE_E2E_*`) passed all five
+  Scenarios, and every command appeared in the timing report.
