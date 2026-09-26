@@ -4,5 +4,6 @@
 mod smoke;
 #[path = "../support/mod.rs"]
 mod support;
+mod sweeps;
 mod test_bed;
 mod timing;

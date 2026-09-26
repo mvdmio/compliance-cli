@@ -23,6 +23,23 @@ pub struct TestBed {
     pub token: String,
 }
 
+impl TestBed {
+    /// The Test-bed's live API description, fetched without a credential, as the CLI fetches it.
+    pub fn description(&self) -> Value {
+        let url = format!("{}/openapi/v1.json", self.url.trim_end_matches('/'));
+        let mut response = ureq::get(&url)
+            .call()
+            .unwrap_or_else(|error| panic!("could not fetch {url}: {error}"));
+        let text = response
+            .body_mut()
+            .with_config()
+            .limit(u64::MAX)
+            .read_to_string()
+            .unwrap_or_else(|error| panic!("could not read {url}: {error}"));
+        serde_json::from_str(&text).unwrap_or_else(|error| panic!("{url} is not JSON: {error}"))
+    }
+}
+
 /// The Launcher this process started. It is never dropped: its stdin closes when the process ends.
 struct Launcher {
     _child: Child,
