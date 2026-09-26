@@ -36,6 +36,9 @@ CI runs format, lint, and test on Linux, macOS, and Windows for every push and p
 - `SKILL.md`: the Agent skill file. `compliance skill` prints it, built into the binary, so a change to it ships
   with the next release.
 - `tests/fixtures/openapi.json`: the API description the generated-command tests serve.
+- `CONTEXT.md`: the glossary.
+- Compliance and Auth server source: the `mvdmio-suite` monorepo, checked out beside this repo at `../mvdmio-suite`
+  (`Compliance/`, `Auth/`, `Libraries/`). Read it for any fact about what the API does.
 - `tests/`: tests that run the built binary against in-process fake Compliance and Auth hosts (`tests/support`).
   The tests never open a real browser: they run without a display, and the browser test on Linux puts a fake
   `xdg-open` first on `PATH`.
