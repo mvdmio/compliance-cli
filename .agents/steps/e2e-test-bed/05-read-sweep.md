@@ -1,6 +1,6 @@
 # 05 — Read sweep
 
-Status: pending
+Status: done
 
 ## What to build
 
@@ -40,12 +40,40 @@ Projects: compliance-cli (`cargo fmt --check`, `cargo clippy --all-targets -- -D
 
 ## Acceptance criteria
 
-- [ ] Every GET operation in the live description is run, or reported as skipped because the list it depends on is
+- [x] Every GET operation in the live description is run, or reported as skipped because the list it depends on is
       empty.
-- [ ] An operation with no matching command in `--help` fails the sweep.
-- [ ] Ids are found from the Test-bed's lists and the three-entry table, with nothing hard-coded.
-- [ ] Both downloads write a non-empty file through `--out`.
-- [ ] The sweep passes against a fresh Test-bed, or every remaining failure is recorded in `## Outcome` as a
+- [x] An operation with no matching command in `--help` fails the sweep.
+- [x] Ids are found from the Test-bed's lists and the three-entry table, with nothing hard-coded.
+- [x] Both downloads write a non-empty file through `--out`.
+- [x] The sweep passes against a fresh Test-bed, or every remaining failure is recorded in `## Outcome` as a
       Compliance-side finding.
-- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` pass, with the sweep
+- [x] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` pass, with the sweep
       listed as ignored.
+
+## Outcome
+
+- `tests/e2e/sweeps.rs` gains `read_sweep`. `LiveOperation` now also holds `method`, `path`, and `download` (a copy
+  of `is_download` in `src/openapi.rs` and `is_json` in `src/response.rs`).
+- Each GET operation, in document order, fails when it has no `<group>.<action>` `operationId`, when an earlier
+  operation already holds its command name (the CLI would run that one), or when `compliance <group> --help` does
+  not list its action under `Commands:`. Checked by hand: hiding the `risks` actions failed all four risk reads.
+- Path values: each placeholder takes the `id` of the first item in the list at the path before it, with its
+  earlier placeholders filled. `PATH_SOURCES` holds the Spec's three cases (`check-runs/{id}` from `check-results`
+  `checkRunId`, a requirement `{code}` from the framework's requirements list, conversation messages from the
+  conversations list; the last is what the path rule gives too). A list is a page's `items` or a bare array. A list
+  that exits non-zero, prints neither, or whose first item lacks the field fails the read; an empty list skips it,
+  naming the list.
+- The failure for a name an earlier operation already holds goes past the Spec's "when `--help` does not list that
+  command"; it is kept because such an operation is one the CLI dropped (User story 25).
+- Drift from the Spec: `invitations.preview` answers 422 without `personIds`, which the description does not mark
+  required. A second table, `QUERY_SOURCES`, gives it `--person-ids` from the first Person in `people list`, so the
+  sweep's ids stay the Test-bed's own. Compliance-side finding: the description should mark `personIds` required.
+- Every command runs once: the lists that find ids are the same runs as those lists' own reads, and each
+  `<group> --help` runs once. All of them appear in the timing report.
+- Downloads get `--out <temp folder>/<group>-<action>` and pass when the file is non-empty; other reads pass on
+  exit 0 and JSON on stdout. The sweep prints the passed, skipped, and failed reads, then fails once, listing every
+  failure.
+- Drift from the Footprint: none; `tests/e2e/main.rs` needed no change.
+- A fresh Test-bed (`cargo test --test e2e -- --ignored`, no `COMPLIANCE_E2E_*`) passed all ten Scenarios. The Read
+  sweep ran 104 reads: 102 passed, 2 skipped (`import-sessions get` and `tests get`, whose lists are empty after the
+  seed), 0 failed, in about 25 seconds.
