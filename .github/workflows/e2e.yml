@@ -1,0 +1,56 @@
+# The E2E suite, nightly: the CLI from HEAD against a Test-bed built from mvdmio-suite master.
+# A failed scheduled run notifies through GitHub's default notification for scheduled runs, which goes to the
+# user who last changed the cron line.
+
+name: E2E
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GIT_LFS_SKIP_SMUDGE: "1"
+      MVDMIO_SUITE_DIR: ${{ github.workspace }}/mvdmio-suite
+    steps:
+      - name: Check the MVDMIO_SUITE_TOKEN secret
+        env:
+          MVDMIO_SUITE_TOKEN: ${{ secrets.MVDMIO_SUITE_TOKEN }}
+        run: |
+          if [ -z "$MVDMIO_SUITE_TOKEN" ]; then
+            echo "::error::The MVDMIO_SUITE_TOKEN secret is not set: add a read-only token for mvdmio-suite."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - name: Check out mvdmio-suite
+        uses: actions/checkout@v4
+        with:
+          repository: michielvandermeer/mvdmio-suite
+          ref: master
+          token: ${{ secrets.MVDMIO_SUITE_TOKEN }}
+          path: mvdmio-suite
+          lfs: false
+      # mvdmio-suite pins no SDK; its Web project targets net10.0.
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+      # The Compliance build runs `bun install` and `bun build`.
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build
+      # The suite starts the Test-bed through scripts/test-bed.sh; Docker is already on the runner.
+      - run: cargo test --test e2e -- --ignored
+      - name: Upload the timing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-timing
+          path: target/e2e/
+          if-no-files-found: warn

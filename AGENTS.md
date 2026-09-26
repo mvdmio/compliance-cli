@@ -12,6 +12,9 @@ Rust crate `compliance-cli`, binary `compliance`: a command-line tool for the Co
 - Launcher: `scripts/test-bed.sh` (see Test-bed below)
 
 CI runs format, lint, and test on Linux, macOS, and Windows for every push and pull request.
+The E2E suite runs nightly (and on manual dispatch) in `.github/workflows/e2e.yml`, which needs the
+`MVDMIO_SUITE_TOKEN` secret (read-only access to `mvdmio-suite`), set up once by a person. GitHub turns the schedule
+off after 60 days without repository activity; re-enable it in the Actions tab.
 
 ## Layout
 
@@ -50,9 +53,10 @@ CI runs format, lint, and test on Linux, macOS, and Windows for every push and p
 
 ## Test-bed
 
-A Test-bed is a real Compliance built from `mvdmio-suite`, with its own throwaway Postgres container and data folder,
-and a Personal token for seed user 1 on account 1. It needs Docker, the .NET SDK, `bun`, and `curl`, on Linux or
-macOS.
+A Test-bed is a real Compliance built from `mvdmio-suite`, with its own throwaway Postgres container and data folder.
+Every boot reseeds the database, so the Launcher then writes three rows for seed user 1 on account 1: a Legal
+Acceptance, a Personal token, and an Assistant allowance with 100 USD of extra funds for `chat send`. It needs
+Docker, the .NET SDK, `bun`, and `curl`, on Linux or macOS.
 
 - `scripts/test-bed.sh` builds and starts one, prints one JSON line `{"url": "...", "token": "..."}` on stdout, and
   runs in the foreground. Ctrl-C or SIGTERM stops Compliance, removes the container, and deletes the folder. Put the
