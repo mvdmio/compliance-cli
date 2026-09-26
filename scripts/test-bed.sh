@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The Launcher: starts a Test-bed (a real Compliance built from mvdmio-suite, with its own throwaway Postgres and
-# data folder, and a Personal token for seed user 1 on account 1), prints one JSON line {"url","token"} to stdout,
+# data folder, and a Personal token for seed user 1 on Account 1), prints one JSON line {"url","token"} to stdout,
 # and keeps it running until Ctrl-C or SIGTERM. Linux and macOS only.
 #
 #   scripts/test-bed.sh [--until-stdin-closes]

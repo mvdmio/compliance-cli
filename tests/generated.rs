@@ -1,9 +1,12 @@
+#[path = "e2e/operations.rs"]
+mod operations;
 mod support;
 
 use std::fs::{self, File};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
+use operations::{CommandName, live_operations};
 use serde_json::{Value, json};
 use support::{
     DESCRIPTION_PATH, FakeServer, Recorded, Reply, Run, TOKEN, body_json, compliance_in, fixture,
@@ -663,4 +666,119 @@ fn an_unknown_command_with_a_failed_fetch_does_not_fetch_twice() {
 
     assert_eq!(run.code, 2, "{run:#?}");
     assert_eq!(host.description_fetches(), 2);
+}
+
+/// The E2E suite predicts the CLI's commands with copies of its naming rules (`tests/e2e/operations.rs`). On the
+/// fixture, and on a few operations that each test one rule, every command they predict is the one the binary
+/// builds: the same names, the same hidden ones, and `--out` on the same downloads.
+#[test]
+fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
+    let mut document = fixture();
+    for (path, operation_id, media_type) in [
+        (
+            "/api/v1/risk-assessments/by-url",
+            "riskAssessments.listByURLPath",
+            "application/json",
+        ),
+        (
+            "/api/v1/check_runs/v2",
+            "check_runs.getV2Items",
+            "application/problem+json",
+        ),
+        (
+            "/api/v1/reports/pdf",
+            "reports.exportPDF",
+            "application/pdf",
+        ),
+        // A name an earlier operation holds: the CLI keeps the first, which answers JSON.
+        ("/api/v1/risks/export", "risks.list", "text/csv"),
+        // Hidden: an action named `help`, a group named `help`, and a hand-written command without actions.
+        ("/api/v1/risks/help", "risks.help", "application/json"),
+        ("/api/v1/help", "help.list", "application/json"),
+        ("/api/v1/status", "status.get", "application/json"),
+    ] {
+        document["paths"][path] = json!({
+            "get": {
+                "operationId": operation_id,
+                "responses": { "200": { "description": "OK", "content": { media_type: {} } } }
+            }
+        });
+    }
+
+    let mut predicted: Vec<(CommandName, bool)> = Vec::new();
+    let mut hidden = Vec::new();
+    for operation in live_operations(&document) {
+        let Some(command) = operation.command else {
+            continue;
+        };
+        if !command.is_generated() {
+            hidden.push(command);
+        } else if !predicted.iter().any(|(earlier, _)| *earlier == command) {
+            predicted.push((command, operation.download));
+        }
+    }
+    let mut groups: Vec<&str> = Vec::new();
+    for (command, _) in &predicted {
+        if !groups.contains(&command.group.as_str()) {
+            groups.push(&command.group);
+        }
+    }
+
+    let host = Host::start();
+    host.serve(Some(document));
+    // Without the description, only the hand-written commands answer.
+    let hand_written = Host::start();
+    hand_written.serve(None);
+
+    let root = listed_commands(&host.run(&["--help"]));
+    for group in &groups {
+        assert!(
+            root.iter().any(|listed| listed == group),
+            "{group}: {root:?}"
+        );
+
+        let mut expected: Vec<String> = listed_commands(&hand_written.run(&[group, "--help"]));
+        for (command, _) in predicted
+            .iter()
+            .filter(|(command, _)| command.group == *group)
+        {
+            expected.push(command.action.clone());
+        }
+        expected.sort();
+        expected.dedup();
+        let mut listed = listed_commands(&host.run(&[group, "--help"]));
+        listed.sort();
+        assert_eq!(listed, expected, "compliance {group} --help");
+    }
+    for (command, download) in &predicted {
+        let run = host.run(&[&command.group, &command.action, "--help"]);
+        assert_eq!(run.code, 0, "{command} --help: {run:#?}");
+        let takes_out = run
+            .stdout
+            .lines()
+            .any(|line| line.trim_start().starts_with("--out "));
+        assert_eq!(takes_out, *download, "{command} --help: {}", run.stdout);
+    }
+    for command in &hidden {
+        let listed = listed_commands(&host.run(&[&command.group, "--help"]));
+        assert!(
+            !listed.contains(&command.action),
+            "{command} is not hidden: {listed:?}"
+        );
+    }
+}
+
+/// The command names a `--help` lists under `Commands:`, or none when it fails or lists none.
+fn listed_commands(run: &Run) -> Vec<String> {
+    if run.code != 0 {
+        return Vec::new();
+    }
+    run.stdout
+        .lines()
+        .skip_while(|line| line.trim() != "Commands:")
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .filter_map(|line| line.split_whitespace().next())
+        .map(str::to_string)
+        .collect()
 }

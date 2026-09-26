@@ -74,11 +74,6 @@ impl Drop for BackToAccountOne<'_> {
     }
 }
 
-/// The `items` of an Account list.
-fn accounts_in(list: &Value) -> &[Value] {
-    array_field(list, "items")
-}
-
 /// The array `value[field]`, or an empty one when it is missing or not an array.
 fn array_field<'a>(value: &'a Value, field: &str) -> &'a [Value] {
     value[field].as_array().map_or(&[], Vec::as_slice)
@@ -91,14 +86,16 @@ fn has_text(value: &Value, field: &str) -> bool {
 
 /// The id of the Account an Account list marks `current`.
 fn current_account(list: &Value) -> Option<i64> {
-    accounts_in(list)
+    array_field(list, "items")
         .iter()
         .find(|item| item["current"] == true)?["id"]
         .as_i64()
 }
 
 fn lists_account(list: &Value, id: i64) -> bool {
-    accounts_in(list).iter().any(|item| item["id"] == id)
+    array_field(list, "items")
+        .iter()
+        .any(|item| item["id"] == id)
 }
 
 #[test]

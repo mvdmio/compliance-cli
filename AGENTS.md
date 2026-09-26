@@ -48,13 +48,15 @@ off after 60 days without repository activity; re-enable it in the Actions tab.
   The tests never open a real browser: they run without a display, and the browser test on Linux puts a fake
   `xdg-open` first on `PATH`.
 - `scripts/test-bed.sh`: the Launcher, which starts a Test-bed.
-- `tests/e2e/`: the E2E suite (`main.rs`: the Scenarios; `test_bed.rs`: finding or starting the Test-bed and
-  running the binary on it; `timing.rs`: the timing report under `target/e2e/`).
+- `tests/e2e/`: the E2E suite (`smoke.rs`: the smoke Scenarios; `sweeps.rs`: the Help sweep and the Read sweep;
+  `operations.rs`: the operations in the live description and the commands the CLI names them by, copied from
+  `src/` and checked against the binary in `tests/generated.rs`; `test_bed.rs`: finding or starting the Test-bed
+  and running the binary on it; `timing.rs`: the timing report under `target/e2e/`).
 
 ## Test-bed
 
 A Test-bed is a real Compliance built from `mvdmio-suite`, with its own throwaway Postgres container and data folder.
-Every boot reseeds the database, so the Launcher then writes three rows for seed user 1 on account 1: a Legal
+Every boot reseeds the database, so the Launcher then writes three rows for seed user 1 on Account 1: a Legal
 Acceptance, a Personal token, and an Assistant allowance with 100 USD of extra funds for `chat send`. It needs
 Docker, the .NET SDK, `bun`, and `curl`, on Linux or macOS.
 
