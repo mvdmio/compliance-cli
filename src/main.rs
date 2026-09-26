@@ -41,25 +41,26 @@ fn main() -> ExitCode {
     }
 
     let host = config::host();
-    let (operations, handwritten) = match description::load(&host) {
+    let docs_line = format!("Docs: {host}/docs/cli");
+    let (operations, after_help) = match description::load(&host) {
         Ok(mut description) => {
             let mut operations = openapi::operations(&description.document);
             if generated::names_unknown_command(&handwritten, &operations, &args) {
                 description.refetch(&host);
                 operations = openapi::operations(&description.document);
             }
-            (operations, handwritten)
+            (operations, docs_line)
         }
         // Help and the hand-written commands still work without the description; help says what is missing.
         Err(_) if !generated::names_unknown_command(&handwritten, &[], &args) => (
             Vec::new(),
-            handwritten.after_help(format!(
-                "The commands generated from {host}/openapi/v1.json are missing: it could not be read."
-            )),
+            format!(
+                "The commands generated from {host}/openapi/v1.json are missing: it could not be read.\n\n{docs_line}"
+            ),
         ),
         Err(failure) => return failure.report(),
     };
-    let (tree, reachable) = generated::tree(handwritten, &operations);
+    let (tree, reachable) = generated::tree(handwritten.after_help(after_help), &operations);
     parse_and_run(tree, &reachable, &args)
 }
 

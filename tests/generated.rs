@@ -653,6 +653,22 @@ fn help_without_the_description_lists_the_hand_written_commands_and_says_what_is
         "{}",
         run.stdout
     );
+    assert_ends_with_the_cli_guide(&host, &run);
+}
+
+fn assert_ends_with_the_cli_guide(host: &Host, run: &Run) {
+    let expected = format!("Docs: {}/docs/cli", host.server.url());
+    assert!(run.stdout.trim_end().ends_with(&expected), "{}", run.stdout);
+}
+
+#[test]
+fn help_ends_with_the_cli_guide_on_the_current_host() {
+    let host = Host::start();
+
+    let run = host.run(&["--help"]);
+
+    assert_eq!(run.code, 0, "{run:#?}");
+    assert_ends_with_the_cli_guide(&host, &run);
 }
 
 #[test]
