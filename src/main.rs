@@ -41,7 +41,7 @@ fn main() -> ExitCode {
     }
 
     let host = config::host();
-    let docs_line = format!("Docs: {host}/docs/cli");
+    let docs_line = format!("Docs: {host}/docs");
     let (operations, after_help) = match description::load(&host) {
         Ok(mut description) => {
             let mut operations = openapi::operations(&description.document);
