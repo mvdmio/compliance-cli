@@ -4,7 +4,7 @@
 people who script Compliance from a terminal, and for their Agents (Claude Code, Codex, Gemini CLI, and others)
 that run shell commands. Every command prints JSON, and the exit code says what happened.
 
-For the full setup steps, read the [CLI guide](https://compliance.mvdm.io/docs/cli).
+For the full setup steps, read the [CLI guide](https://compliance.mvdm.io/agents/cli).
 
 The CLI talks to the Compliance REST API only. It collects no usage data and sends none: no telemetry, no
 crash reports, no update checks.

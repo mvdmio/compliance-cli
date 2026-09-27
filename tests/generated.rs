@@ -657,7 +657,7 @@ fn help_without_the_description_lists_the_hand_written_commands_and_says_what_is
 }
 
 fn assert_ends_with_the_docs_address(host: &Host, run: &Run) {
-    let expected = format!("Docs: {}/docs", host.server.url());
+    let expected = format!("Docs: {}/agents", host.server.url());
     assert!(run.stdout.trim_end().ends_with(&expected), "{}", run.stdout);
 }
 
