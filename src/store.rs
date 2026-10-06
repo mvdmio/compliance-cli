@@ -1,3 +1,5 @@
+//! The stored sign-in, in `credentials.json` in the user's config folder: one entry per host, mode 0600 on Unix.
+
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};

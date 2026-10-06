@@ -1,18 +1,11 @@
-# AGENTS.md
+# compliance-cli
 
-Rust crate `compliance-cli`, binary `compliance`: a command-line tool for the Compliance REST API.
+- Finish each change green on the checks in `.github/workflows/ci.yml`, which CI also runs on macOS and Windows.
 
-- Finish each change green on CI's checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
-  `cargo test`.
+## Context
 
-## Reach for
-
-- **Coding standards** — before changing code, tests, docs, or dependencies:
-  [`CODING_STANDARDS.md`](CODING_STANDARDS.md).
-- **API facts** — any fact about what the API does: read the Compliance and Auth server source in `../mvdmio-suite`
-  (`Compliance/`, `Auth/`, `Libraries/`).
-- **Layout** — find the module that owns a concern: [`.agents/refs/layout.md`](.agents/refs/layout.md).
-- **Test-bed** — run commands against a real Compliance with the Launcher, or work on the E2E suite or its nightly
-  run: [`.agents/refs/test-bed.md`](.agents/refs/test-bed.md).
-- **Release** — cut one, or change how one is built: [`.agents/refs/release.md`](.agents/refs/release.md).
-- **Tracker** — read or write an Issue: [`.agents/refs/tracker.md`](.agents/refs/tracker.md).
+- Before writing code, tests, or docs, or changing `Cargo.toml` → [`CODING_STANDARDS.md`](CODING_STANDARDS.md).
+- Before relying on a fact about what the API does → the Compliance and Auth server source in `../mvdmio-suite`.
+- Before running `compliance` against a real Compliance (a Test-bed), or running the E2E suite → the Launcher's
+  header, in `scripts/test-bed.sh`.
+- Before reading or writing an Issue → [`.agents/refs/tracker.md`](.agents/refs/tracker.md).

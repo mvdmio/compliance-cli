@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # The Launcher: starts a Test-bed (a real Compliance built from mvdmio-suite, with its own throwaway Postgres and
 # data folder, and a Personal token for seed user 1 on Account 1), prints one JSON line {"url","token"} to stdout,
-# and keeps it running until Ctrl-C or SIGTERM. Linux and macOS only.
+# and keeps it running until Ctrl-C or SIGTERM. Linux and macOS only, with docker, dotnet (the .NET SDK), bun, and
+# curl on PATH. Several Test-beds can run side by side.
 #
 #   scripts/test-bed.sh [--until-stdin-closes]
+#
+# Put the url and token in COMPLIANCE_URL and COMPLIANCE_TOKEN to run `compliance` against the Test-bed, or in
+# COMPLIANCE_E2E_URL and COMPLIANCE_E2E_TOKEN to run the E2E suite on it (`cargo test --test e2e -- --ignored`),
+# which otherwise starts a Test-bed of its own.
 #
 # --until-stdin-closes also stops the Test-bed when stdin reaches end of file, so a caller that holds the pipe
 # open stops it by exiting, however it exits.
 #
 # Environment:
-#   MVDMIO_SUITE_DIR          the mvdmio-suite checkout (default: ../mvdmio-suite next to this repo)
+#   MVDMIO_SUITE_DIR          the mvdmio-suite checkout (default: ../mvdmio-suite next to this checkout; set
+#                             it in a git worktree)
 #   TEST_BED_BOOT_TIMEOUT     seconds allowed for the build lock, the build, and the boot together
 #                             (default: 1800)
 #

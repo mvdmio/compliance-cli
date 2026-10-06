@@ -1,42 +1,39 @@
 # Coding Standards
 
-## Platforms
+## Language
 
-- Write code and tests that pass on Linux, macOS, and Windows: CI checks every push and pull request on all three.
+- Name domain concepts with the terms of the server's glossaries, `../mvdmio-suite/Compliance/docs/CONTEXT.md` and
+  `../mvdmio-suite/Auth/docs/CONTEXT.md`, capitalised as they write them (Personal token, Agent connection, Account,
+  User, Upload link), and testing concepts with this repo's [`CONTEXT.md`](CONTEXT.md): in identifiers, messages, and
+  docs alike.
 
-## Output
+## Code
 
-- Every output is JSON, except `--help`, `--version`, and `compliance skill` (Markdown).
-- Exit codes: 0 success, 1 error, 2 usage, 3 Browser handoff.
-
-## Network
-
-- TLS is rustls only: `cargo tree -i openssl-sys` must find nothing.
-- Every request serves the command the user ran. That keeps the README's promise: no telemetry, no crash reports, no
-  update checks.
+- Return every failure as a `Failure` (`src/failure.rs`): `Failure::report` prints it as JSON and picks its exit code.
+  `src/` has no `unwrap`, and each `expect` states the invariant that makes it safe (`"the file sits in a folder"`):
+  a panic would print plain text and exit 101.
+- Write a failure message as sentences for the Agent that reads stderr, ending with the fix when the user has one:
+  "No credential. Run `compliance login`, or set COMPLIANCE_TOKEN to a Personal token."
+- Mark a discarded result (`let _ =`) with `// Ignored:` and why dropping it is safe.
+- Wrap comments at 120 columns; rustfmt wraps only the code, at 100.
 
 ## Tests
 
-- Tests drive the built binary as an Agent does, against in-process Fake hosts for Compliance and Auth
-  (`tests/support`): arguments and environment go in, and assertions read what comes out — stdout, stderr, the exit
-  code, and the requests that reached the Fake hosts.
-- Every browser a test opens is a fake. Tests run without a display (`tests/support` removes `DISPLAY` and
-  `WAYLAND_DISPLAY`), so `login` takes the device code. macOS and Windows always have a browser to open, so a test
-  that runs `login` without `--device` carries a `#[cfg]` that leaves them out; the browser sign-in tests run on
-  Linux only, with a fake `xdg-open` first on `PATH`.
-- Change a rule that `tests/e2e/operations.rs` copies from `src/` (its `//!` doc lists them) together with its copy:
-  `tests/generated.rs` checks the copies against the binary on every push.
-- Mark each E2E Scenario `#[ignore]` with the reason the others carry, so plain `cargo test` lists it without running
-  it and needs no .NET, Docker, or Postgres.
+- Test through the built binary, from `tests/`, against the Fake hosts in `tests/support`: arguments and environment
+  go in, and assertions read stdout, stderr, the exit code, and the requests the Fake hosts recorded. `src/` holds no
+  `#[cfg(test)]` module.
+- Gate a test that runs `login` without `--device` off macOS and Windows with `#[cfg]`: they open a real browser
+  whatever the environment, while on Linux `tests/support` removes the display.
+- Change `tests/e2e/operations.rs` with any CLI rule it copies; its comments name each source, down to the hand-written
+  commands without actions in `src/cli.rs`. `cargo test` checks the copies against the fixture only.
 
 ## Docs
 
-- `SKILL.md`, the Agent skill file, ships inside the binary: `compliance skill` prints it, so an edit to it reaches
-  users with the next release.
+- Describe a change to what a command does in `README.md` and `SKILL.md` in the same commit. `SKILL.md` ships inside
+  the binary as `compliance skill`, so it describes the build it came with.
 
-## Releases
+## Dependencies and releases
 
-- Change the release build in `dist-workspace.toml`, then run `dist generate`, which writes
-  `.github/workflows/release.yml` from it.
-- Keep the installer names, `compliance-cli-installer.sh` and `compliance-cli-installer.ps1` (dist names them after
-  the package): the install lines always fetch them from the latest release.
+- Keep TLS on rustls: `cargo tree -i openssl-sys` must find nothing.
+- Keep the package name `compliance-cli`: dist names the installers after it, and Compliance's `/cli/install.sh` and
+  `/cli/install.ps1` redirect to `compliance-cli-installer.sh` and `.ps1` on this repo's latest GitHub Release.
