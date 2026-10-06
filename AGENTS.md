@@ -2,25 +2,23 @@
 
 Rust crate `compliance-cli`, binary `compliance`: a command-line tool for the Compliance REST API.
 
+Before writing code or tests, or adding a dependency → `CODING_STANDARDS.md`.
+
 ## Commands
 
-- Build: `cargo build`
-- Test: `cargo test`
 - Lint: `cargo clippy --all-targets -- -D warnings`
-- Format: `cargo fmt` (CI runs `cargo fmt --check`)
 - E2E suite: `cargo test --test e2e -- --ignored` (see Test-bed below)
 - Launcher: `scripts/test-bed.sh` (see Test-bed below)
 
-CI runs format, lint, and test on Linux, macOS, and Windows for every push and pull request.
-The E2E suite runs nightly (and on manual dispatch) in `.github/workflows/e2e.yml`, which needs the
-`MVDMIO_SUITE_DEPLOY_KEY` secret: the private half of the read-only deploy key "compliance-cli E2E (read-only)" on
-`mvdmio-suite`, set up once by a person. GitHub turns the schedule
-off after 60 days without repository activity; re-enable it in the Actions tab.
+CI runs format, lint, and test on Linux, macOS, and Windows for every push and pull request. The E2E suite runs
+nightly (and on manual dispatch) in `.github/workflows/e2e.yml`, which needs the `MVDMIO_SUITE_DEPLOY_KEY` secret:
+the private half of the read-only deploy key "compliance-cli E2E (read-only)" on `mvdmio-suite`, set up once by a
+person. GitHub turns the schedule off after 60 days without repository activity; re-enable it in the Actions tab.
 
 ## Layout
 
-- `src/main.rs`: argument parsing, the choice between hand-written and generated commands, and the exit-code
-  mapping.
+- `src/main.rs`: argument parsing (a parser error is a usage mistake) and the choice between hand-written and
+  generated commands.
 - `src/cli.rs`: the command line.
 - `src/config.rs`: the host.
 - `src/credential.rs`: the credential in use (`COMPLIANCE_TOKEN`, else the stored sign-in) and its refresh.
@@ -33,8 +31,8 @@ off after 60 days without repository activity; re-enable it in the Actions tab.
 - `src/description.rs`: the API's OpenAPI description, cached per host for an hour and fetched again for an
   unknown command.
 - `src/openapi.rs`: reads operations, parameters, and body fields out of the description.
-- `src/generated.rs`: builds the generated commands beside the hand-written ones. `src/dispatch.rs`: turns their
-  arguments into the request.
+- `src/generated.rs`: builds the generated commands beside the hand-written ones.
+- `src/dispatch.rs`: turns a generated command's arguments into the request.
 - `src/upload.rs`: `--file`, which sends a file through an Upload link, in parts when it is large, and resumes.
 - `src/failure.rs`, `src/output.rs`: errors, exit codes, and JSON printing.
 - `src/login.rs`, `src/logout.rs`, `src/status.rs`, `src/accounts.rs`, `src/chat.rs`, `src/api.rs`,
@@ -46,13 +44,12 @@ off after 60 days without repository activity; re-enable it in the Actions tab.
 - Compliance and Auth server source: the `mvdmio-suite` monorepo, checked out beside this repo at `../mvdmio-suite`
   (`Compliance/`, `Auth/`, `Libraries/`). Read it for any fact about what the API does.
 - `tests/`: tests that run the built binary against in-process fake Compliance and Auth hosts (`tests/support`).
-  The tests never open a real browser: they run without a display, and the browser test on Linux puts a fake
-  `xdg-open` first on `PATH`.
 - `scripts/test-bed.sh`: the Launcher, which starts a Test-bed.
-- `tests/e2e/`: the E2E suite (`smoke.rs`: the smoke Scenarios; `sweeps.rs`: the Help sweep and the Read sweep;
-  `operations.rs`: the operations in the live description and the commands the CLI names them by, copied from
-  `src/` and checked against the binary in `tests/generated.rs`; `test_bed.rs`: finding or starting the Test-bed
-  and running the binary on it; `timing.rs`: the timing report under `target/e2e/`).
+- `tests/e2e/`: the E2E suite (`main.rs`: the `e2e` test target, which shares `tests/support`; `smoke.rs`: the
+  smoke Scenarios; `sweeps.rs`: the Help sweep and the Read sweep; `operations.rs`: the operations in the live
+  description and the commands the CLI names them by, copied from `src/` and checked against the binary in
+  `tests/generated.rs`; `test_bed.rs`: finding or starting the Test-bed and running the binary on it; `timing.rs`:
+  the timing report under `target/e2e/`).
 
 ## Test-bed
 
@@ -87,12 +84,3 @@ To cut a release:
    builds every target and publishes a GitHub Release with `compliance-cli-installer.sh` and
    `compliance-cli-installer.ps1`. The install lines always fetch the installers of the latest release, so keep
    those names.
-
-## Rules
-
-- Every output is JSON, except `--help`, `--version`, and `compliance skill` (Markdown). Exit codes: 0 success, 1 error, 2 usage, 3 Browser
-  handoff.
-- Tests drive the binary as an Agent does: arguments and environment in; stdout, stderr, the exit code, and the
-  requests that reached the fake server out. They never check internal types.
-- TLS is rustls only: `cargo tree -i openssl-sys` must find nothing.
-- No telemetry.
