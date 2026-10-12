@@ -14,11 +14,12 @@ fn status() {
 
     assert_eq!(run.code, 0, "{run:#?}");
     let status = run.stdout_json();
-    assert_eq!(status["host"], json!(scenario.test_bed().url), "{run:#?}");
+    // The Test-bed needs no Auth, so `status` names the default one.
+    assert_eq!(status["auth"], json!("https://auth.mvdm.io"), "{run:#?}");
     assert_eq!(status["signedIn"], json!(true), "{run:#?}");
     assert_eq!(
         status["credential"],
-        json!({ "kind": "personal-token", "source": "COMPLIANCE_TOKEN" }),
+        json!({ "kind": "personal-token", "source": "MVDM_TOKEN" }),
         "{run:#?}"
     );
     // A Personal token carries no `id_token`, so `status` names no User for it.
@@ -103,11 +104,12 @@ fn lists_account(list: &Value, id: i64) -> bool {
 fn api() {
     let scenario = Scenario::start("api");
 
-    let list = scenario.run(&["api", "GET", "/api/v1/risks"]);
+    let list = scenario.run(&["compliance", "api", "GET", "/api/v1/risks"]);
     assert_eq!(list.code, 0, "{list:#?}");
     assert!(list.stdout_json()["items"].is_array(), "{list:#?}");
 
     let missing = scenario.run(&[
+        "compliance",
         "api",
         "GET",
         "/api/v1/risks/00000000-0000-0000-0000-000000000000",
@@ -126,6 +128,7 @@ fn generated_write_with_body() {
 
     // Only the fields `risks.create` requires. The Risk stays on the Test-bed.
     let run = scenario.run(&[
+        "compliance",
         "risks",
         "create",
         "--body",
@@ -179,6 +182,7 @@ fn upload_evidence(scenario: &Scenario, name: &str, length: usize) {
 
     // `title` is the one field `evidence.create` requires beside the upload.
     let run = scenario.run(&[
+        "compliance",
         "evidence",
         "create",
         "--file",
@@ -197,7 +201,7 @@ fn upload_evidence(scenario: &Scenario, name: &str, length: usize) {
 fn chat_send() {
     let scenario = Scenario::start("chat send");
 
-    let run = scenario.run(&["chat", "send", "Hello from the E2E suite."]);
+    let run = scenario.run(&["compliance", "chat", "send", "Hello from the E2E suite."]);
 
     // Scripted Turns still debit Account 1's Assistant allowance, which the Launcher funds.
     let out_of_funds = run

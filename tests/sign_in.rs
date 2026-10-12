@@ -1,21 +1,28 @@
 mod support;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use support::{
-    FakeServer, Recorded, Reply, Run, accounts_list, auth_metadata, compliance, credentials_path,
-    id_token, oauth_error, read_credentials, resource_metadata, store_sign_in, tokens, unix_now,
+    ACCOUNTS_PATH, DESCRIPTION_PATH, FakeServer, LIST_PATH, Recorded, Reply, Run, accounts_list,
+    age_files, auth_metadata, closed_address, credentials_path, description_with_accounts_moved,
+    id_token, listed_product, mvdm, oauth_error, product_list, read_credentials, store_sign_in,
+    tokens, unix_now, with_description,
 };
 use tempfile::TempDir;
 
-const CLIENT_ID: &str = "mvdmio.compliance_cli";
+const CLIENT_ID: &str = "mvdmio.cli";
 
-/// A fake Compliance host whose Protected Resource Metadata names a separate fake Auth, and a config folder.
+/// A fake Auth that serves discovery and a Product list naming a fake Compliance first, and a second Product
+/// nobody serves. Also a config folder, with the cache folder inside it.
 struct Hosts {
     auth: FakeServer,
     compliance: FakeServer,
     config: TempDir,
+    /// While set, Auth answers 503 to the Product list.
+    list_down: Arc<AtomicBool>,
 }
 
 impl Hosts {
@@ -31,43 +38,70 @@ impl Hosts {
         auth: impl Fn(&Recorded) -> Reply + Send + Sync + 'static,
         api: impl Fn(&Recorded) -> Reply + Send + Sync + 'static,
     ) -> Self {
+        Hosts::start_serving(config, auth, with_description(api))
+    }
+
+    /// Like `start`, but `compliance` answers every request itself, the description included.
+    fn start_serving(
+        config: TempDir,
+        auth: impl Fn(&Recorded) -> Reply + Send + Sync + 'static,
+        compliance: impl Fn(&Recorded) -> Reply + Send + Sync + 'static,
+    ) -> Self {
+        let compliance = FakeServer::start(compliance);
+        let list = vec![
+            listed_product("compliance", &compliance.url()),
+            listed_product("other", "http://other.example.test"),
+        ];
+        let list_down = Arc::new(AtomicBool::new(false));
+        let down = Arc::clone(&list_down);
         let auth = FakeServer::start(move |request| {
-            auth_metadata(request).unwrap_or_else(|| auth(request))
-        });
-        let issuer = format!("{}/", auth.url());
-        let compliance = FakeServer::start(move |request| {
-            resource_metadata(request, &issuer).unwrap_or_else(|| api(request))
+            if request.path() == LIST_PATH && down.load(Ordering::SeqCst) {
+                return Reply::empty(503);
+            }
+            auth_metadata(request)
+                .or_else(|| product_list(request, &list))
+                .unwrap_or_else(|| auth(request))
         });
         Hosts {
             auth,
             compliance,
             config,
+            list_down,
         }
     }
 
+    /// The first listed Product's host.
     fn host(&self) -> String {
         self.compliance.url()
     }
 
+    /// The first listed Product's API resource, which every request to Auth names.
     fn resource(&self) -> String {
         format!("{}/api", self.host())
     }
 
+    fn cache(&self) -> std::path::PathBuf {
+        self.config.path().join("cache")
+    }
+
+    /// Runs `mvdm` against this Auth, with the config and cache folders of this test, and no Product variable.
     fn run(&self, args: &[&str], env: &[(&str, &str)]) -> Run {
-        let host = self.host();
+        let auth = self.auth.url();
         let config = self.config.path().to_string_lossy().into_owned();
+        let cache = self.cache().to_string_lossy().into_owned();
         let mut all = vec![
-            ("COMPLIANCE_URL", host.as_str()),
-            ("COMPLIANCE_CONFIG_DIR", config.as_str()),
+            ("MVDM_AUTH_URL", auth.as_str()),
+            ("MVDM_CONFIG_DIR", config.as_str()),
+            ("MVDM_CACHE_DIR", cache.as_str()),
         ];
         all.extend_from_slice(env);
-        compliance(args, &all)
+        mvdm(args, &all)
     }
 
     fn store(&self, access_token: &str, expires_at: u64, refresh_token: &str) {
         store_sign_in(
             self.config.path(),
-            &self.host(),
+            &self.auth.url(),
             access_token,
             expires_at,
             refresh_token,
@@ -75,7 +109,11 @@ impl Hosts {
     }
 
     fn stored(&self) -> Value {
-        read_credentials(self.config.path())["hosts"][self.host()].clone()
+        read_credentials(self.config.path())["hosts"][self.auth.url()].clone()
+    }
+
+    fn list_fetches(&self) -> usize {
+        self.auth_requests(LIST_PATH).len()
     }
 
     fn auth_requests(&self, path: &str) -> Vec<Recorded> {
@@ -93,6 +131,16 @@ impl Hosts {
             .filter(|request| request.path().starts_with("/api/"))
             .collect()
     }
+}
+
+/// The paths of the API calls `server` got, the description left out.
+fn api_paths(server: &FakeServer) -> Vec<String> {
+    server
+        .requests()
+        .iter()
+        .map(|request| request.path().to_string())
+        .filter(|path| path.starts_with("/api/"))
+        .collect()
 }
 
 fn stderr_lines(run: &Run) -> Vec<Value> {
@@ -140,7 +188,7 @@ fn signed_in_tokens() -> Reply {
 
 fn accounts_api(request: &Recorded) -> Reply {
     match request.path() {
-        "/api/v1/accounts" => accounts_list(),
+        ACCOUNTS_PATH => accounts_list(),
         _ => Reply::empty(404),
     }
 }
@@ -166,7 +214,7 @@ fn login_device_shows_the_code_polls_through_pending_and_stores_the_sign_in() {
         run.stdout_json(),
         json!({
             "status": "logged_in",
-            "host": hosts.host(),
+            "auth": hosts.auth.url(),
             "user": { "name": "Ada Lovelace", "email": "ada@example.test" },
             "account": { "id": 2, "name": "Beta", "current": true },
         })
@@ -201,29 +249,73 @@ fn login_device_shows_the_code_polls_through_pending_and_stores_the_sign_in() {
 }
 
 #[test]
-fn auth_is_found_only_through_the_protected_resource_metadata() {
+fn login_reads_auths_discovery_and_product_list_and_no_protected_resource_metadata() {
     let hosts = Hosts::start(device_auth(signed_in_tokens), accounts_api);
 
     let run = hosts.run(&["login", "--device"], &[]);
 
     assert_eq!(run.code, 0, "{run:#?}");
-    let compliance_paths: Vec<String> = hosts
-        .compliance
-        .requests()
-        .iter()
-        .map(|request| request.path().to_string())
-        .collect();
+    let paths = |server: &FakeServer| -> Vec<String> {
+        server
+            .requests()
+            .iter()
+            .map(|request| request.path().to_string())
+            .collect()
+    };
     assert_eq!(
-        compliance_paths,
-        vec![
-            "/.well-known/oauth-protected-resource/api",
-            "/api/v1/accounts"
-        ]
+        paths(&hosts.compliance),
+        vec![DESCRIPTION_PATH, ACCOUNTS_PATH]
     );
-    assert_eq!(
-        hosts.auth.requests()[0].path(),
-        "/.well-known/openid-configuration"
+    let auth_paths = paths(&hosts.auth);
+    assert!(
+        auth_paths.contains(&"/.well-known/openid-configuration".to_string()),
+        "{auth_paths:?}"
     );
+    assert!(
+        auth_paths.contains(&LIST_PATH.to_string()),
+        "{auth_paths:?}"
+    );
+    assert!(
+        auth_paths
+            .iter()
+            .all(|path| !path.contains("oauth-protected-resource")),
+        "{auth_paths:?}"
+    );
+}
+
+#[test]
+fn login_stores_one_sign_in_under_the_auth_address_and_logout_removes_it() {
+    let hosts = Hosts::start(
+        |request| match request.path() {
+            "/connect/device" => device_authorization(0),
+            "/connect/token" => signed_in_tokens(),
+            "/connect/revoke" => Reply::empty(200),
+            _ => Reply::empty(404),
+        },
+        accounts_api,
+    );
+
+    let login = hosts.run(&["login", "--device"], &[]);
+    assert_eq!(login.code, 0, "{login:#?}");
+    let keys = |hosts: &Hosts| -> Vec<String> {
+        read_credentials(hosts.config.path())["hosts"]
+            .as_object()
+            .expect("a hosts object")
+            .keys()
+            .cloned()
+            .collect()
+    };
+    assert_eq!(keys(&hosts), vec![hosts.auth.url()]);
+
+    // A call to the Product adds no entry for its host.
+    let call = hosts.run(&["compliance", "api", "GET", ACCOUNTS_PATH], &[]);
+    assert_eq!(call.code, 0, "{call:#?}");
+    assert_eq!(keys(&hosts), vec![hosts.auth.url()]);
+
+    let logout = hosts.run(&["logout"], &[]);
+    assert_eq!(logout.code, 0, "{logout:#?}");
+    assert_eq!(hosts.auth_requests("/connect/revoke").len(), 1);
+    assert!(!credentials_path(hosts.config.path()).exists());
 }
 
 /// Windows and macOS always have a browser to open.
@@ -306,7 +398,7 @@ fn the_stored_sign_in_is_readable_only_by_its_owner_after_login_and_after_a_refr
     assert_eq!(login.code, 0, "{login:#?}");
     assert_eq!(mode(), 0o600);
 
-    let call = hosts.run(&["api", "GET", "/api/v1/accounts"], &[]);
+    let call = hosts.run(&["compliance", "api", "GET", ACCOUNTS_PATH], &[]);
     assert_eq!(call.code, 0, "{call:#?}");
     assert_eq!(hosts.stored()["refreshToken"], "refresh-2");
     assert_eq!(mode(), 0o600);
@@ -329,7 +421,7 @@ fn an_expired_access_token_is_refreshed_before_the_call_and_the_new_refresh_toke
     let hosts = Hosts::start(rotating_auth, ok_api);
     hosts.store("access-1", unix_now() + 30, "refresh-1");
 
-    let run = hosts.run(&["api", "GET", "/api/v1/risks"], &[]);
+    let run = hosts.run(&["compliance", "api", "GET", "/api/v1/risks"], &[]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     let refresh = hosts.auth_requests("/connect/token");
@@ -357,14 +449,41 @@ fn an_expired_access_token_is_refreshed_before_the_call_and_the_new_refresh_toke
 }
 
 #[test]
+fn a_refresh_needs_only_auths_discovery_not_the_product_list() {
+    let hosts = Hosts::start(rotating_auth, ok_api);
+    hosts.store("access-1", unix_now() + 30, "refresh-1");
+    hosts.list_down.store(true, Ordering::SeqCst);
+
+    let host = hosts.host();
+    let run = hosts.run(
+        &["compliance", "api", "GET", "/api/v1/risks"],
+        &[("MVDM_COMPLIANCE_URL", &host)],
+    );
+
+    assert_eq!(run.code, 0, "{run:#?}");
+    let refresh = hosts.auth_requests("/connect/token");
+    assert_eq!(refresh.len(), 1);
+    assert_eq!(
+        refresh[0].form("refresh_token").as_deref(),
+        Some("refresh-1")
+    );
+    assert_eq!(refresh[0].form("resource"), None);
+    assert_eq!(
+        hosts.api_requests()[0].header("Authorization"),
+        Some("Bearer access-2")
+    );
+    assert_eq!(hosts.stored()["refreshToken"], "refresh-2");
+}
+
+#[test]
 fn a_fresh_access_token_is_used_without_a_refresh() {
     let hosts = Hosts::start(rotating_auth, ok_api);
     hosts.store("access-1", unix_now() + 3600, "refresh-1");
 
-    let run = hosts.run(&["api", "GET", "/api/v1/risks"], &[]);
+    let run = hosts.run(&["compliance", "api", "GET", "/api/v1/risks"], &[]);
 
     assert_eq!(run.code, 0, "{run:#?}");
-    assert!(hosts.auth.requests().is_empty());
+    assert!(hosts.auth_requests("/connect/token").is_empty());
     assert_eq!(
         hosts.api_requests()[0].header("Authorization"),
         Some("Bearer access-1")
@@ -382,7 +501,7 @@ fn a_401_refreshes_once_and_retries_once() {
     });
     hosts.store("access-1", unix_now() + 3600, "refresh-1");
 
-    let run = hosts.run(&["api", "GET", "/api/v1/risks"], &[]);
+    let run = hosts.run(&["compliance", "api", "GET", "/api/v1/risks"], &[]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(run.stdout_json(), json!({ "ok": 1 }));
@@ -397,7 +516,7 @@ fn a_second_401_after_the_refresh_is_reported() {
     });
     hosts.store("access-1", unix_now() + 3600, "refresh-1");
 
-    let run = hosts.run(&["api", "GET", "/api/v1/risks"], &[]);
+    let run = hosts.run(&["compliance", "api", "GET", "/api/v1/risks"], &[]);
 
     assert_eq!(run.code, 1, "{run:#?}");
     assert_eq!(run.stderr_json()["type"], "unauthorized");
@@ -406,7 +525,7 @@ fn a_second_401_after_the_refresh_is_reported() {
 }
 
 #[test]
-fn a_refresh_answered_invalid_grant_removes_only_that_hosts_entry_and_asks_for_login() {
+fn a_refresh_answered_invalid_grant_removes_only_that_auths_entry_and_asks_for_login() {
     let hosts = Hosts::start(|_| oauth_error("invalid_grant"), ok_api);
     hosts.store("access-1", unix_now(), "refresh-1");
     store_sign_in(
@@ -417,16 +536,13 @@ fn a_refresh_answered_invalid_grant_removes_only_that_hosts_entry_and_asks_for_l
         "other-refresh",
     );
 
-    let run = hosts.run(&["api", "GET", "/api/v1/risks"], &[]);
+    let run = hosts.run(&["compliance", "api", "GET", "/api/v1/risks"], &[]);
 
     assert_eq!(run.code, 1, "{run:#?}");
     let error = run.stderr_json();
     assert_eq!(error["error"], "not-signed-in");
     assert!(
-        error["message"]
-            .as_str()
-            .unwrap()
-            .contains("compliance login"),
+        error["message"].as_str().unwrap().contains("mvdm login"),
         "{error}"
     );
     assert!(hosts.api_requests().is_empty());
@@ -438,13 +554,17 @@ fn a_refresh_answered_invalid_grant_removes_only_that_hosts_entry_and_asks_for_l
 }
 
 #[test]
-fn compliance_token_wins_over_the_stored_sign_in_and_is_never_refreshed_or_stored() {
+fn mvdm_token_wins_over_the_stored_sign_in_and_is_never_refreshed_or_stored() {
     let hosts = Hosts::start(rotating_auth, ok_api);
     hosts.store("access-1", unix_now(), "refresh-1");
 
+    let host = hosts.host();
     let run = hosts.run(
-        &["api", "GET", "/api/v1/risks"],
-        &[("COMPLIANCE_TOKEN", "cmp_pat_test")],
+        &["compliance", "api", "GET", "/api/v1/risks"],
+        &[
+            ("MVDM_TOKEN", "cmp_pat_test"),
+            ("MVDM_COMPLIANCE_URL", &host),
+        ],
     );
 
     assert_eq!(run.code, 0, "{run:#?}");
@@ -454,6 +574,187 @@ fn compliance_token_wins_over_the_stored_sign_in_and_is_never_refreshed_or_store
     );
     assert!(hosts.auth.requests().is_empty());
     assert_eq!(hosts.stored()["accessToken"], "access-1");
+}
+
+#[test]
+fn a_product_variable_and_a_personal_token_run_a_command_with_no_auth_reachable() {
+    let compliance = FakeServer::start(ok_api);
+    let auth = closed_address();
+
+    let run = mvdm(
+        &["compliance", "api", "GET", "/api/v1/risks"],
+        &[
+            ("MVDM_COMPLIANCE_URL", &compliance.url()),
+            ("MVDM_TOKEN", "cmp_pat_test"),
+            ("MVDM_AUTH_URL", &auth),
+        ],
+    );
+
+    assert_eq!(run.code, 0, "{run:#?}");
+    assert_eq!(run.stdout_json(), json!({ "items": [] }));
+    assert_eq!(compliance.only_request().path(), "/api/v1/risks");
+}
+
+#[test]
+fn without_a_variable_an_unreachable_product_list_is_a_local_discovery_failure() {
+    let auth = closed_address();
+
+    let run = mvdm(
+        &["compliance", "api", "GET", "/api/v1/risks"],
+        &[("MVDM_TOKEN", "cmp_pat_test"), ("MVDM_AUTH_URL", &auth)],
+    );
+
+    assert_eq!(run.code, 1, "{run:#?}");
+    assert_eq!(run.stdout, "");
+    let error = run.stderr_json();
+    assert_eq!(error["error"], "discovery");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("{auth}{LIST_PATH}")),
+        "{error}"
+    );
+}
+
+#[test]
+fn the_product_list_is_fetched_once_and_kept_for_an_hour() {
+    let hosts = Hosts::start(|_| Reply::empty(404), accounts_api);
+    let token = [("MVDM_TOKEN", "cmp_pat_test")];
+
+    assert_eq!(hosts.run(&["accounts", "list"], &token).code, 0);
+    assert_eq!(hosts.run(&["accounts", "list"], &token).code, 0);
+    assert_eq!(hosts.list_fetches(), 1);
+
+    age_files(&hosts.cache(), Duration::from_secs(2 * 60 * 60));
+    assert_eq!(hosts.run(&["accounts", "list"], &token).code, 0);
+    assert_eq!(hosts.list_fetches(), 2);
+}
+
+#[test]
+fn a_stale_product_list_is_used_when_the_fetch_fails() {
+    let hosts = Hosts::start(|_| Reply::empty(404), accounts_api);
+    let token = [("MVDM_TOKEN", "cmp_pat_test")];
+    assert_eq!(hosts.run(&["accounts", "list"], &token).code, 0);
+    age_files(&hosts.cache(), Duration::from_secs(2 * 60 * 60));
+    hosts.list_down.store(true, Ordering::SeqCst);
+
+    let run = hosts.run(&["accounts", "list"], &token);
+
+    assert_eq!(run.code, 0, "{run:#?}");
+    assert_eq!(hosts.list_fetches(), 2);
+    assert_eq!(hosts.api_requests().len(), 2);
+}
+
+#[test]
+fn the_account_product_is_the_first_variable_in_name_order_else_the_first_listed() {
+    let hosts = Hosts::start(|_| Reply::empty(404), accounts_api);
+    let early = FakeServer::start(with_description(accounts_api));
+    let late = FakeServer::start(with_description(accounts_api));
+    let token = ("MVDM_TOKEN", "cmp_pat_test");
+
+    let by_variable = hosts.run(
+        &["accounts", "list"],
+        &[
+            token,
+            ("MVDM_ZEBRA_URL", &late.url()),
+            ("MVDM_ALPHA_URL", &early.url()),
+        ],
+    );
+    assert_eq!(by_variable.code, 0, "{by_variable:#?}");
+    assert_eq!(api_paths(&early), vec![ACCOUNTS_PATH]);
+    assert!(api_paths(&late).is_empty());
+    assert!(hosts.compliance.requests().is_empty());
+    assert_eq!(hosts.list_fetches(), 0, "a variable needs no list");
+
+    let by_list = hosts.run(&["accounts", "list"], &[token]);
+    assert_eq!(by_list.code, 0, "{by_list:#?}");
+    assert_eq!(hosts.api_requests().len(), 1);
+    assert_eq!(api_paths(&early), vec![ACCOUNTS_PATH]);
+}
+
+#[test]
+fn status_follows_the_account_product_too() {
+    let hosts = Hosts::start(|_| Reply::empty(404), accounts_api);
+    let named = FakeServer::start(with_description(accounts_api));
+
+    let run = hosts.run(
+        &["status"],
+        &[
+            ("MVDM_TOKEN", "cmp_pat_test"),
+            ("MVDM_HEALTH_CHECK_URL", &named.url()),
+        ],
+    );
+
+    assert_eq!(run.code, 0, "{run:#?}");
+    assert_eq!(api_paths(&named), vec![ACCOUNTS_PATH]);
+    assert!(hosts.compliance.requests().is_empty());
+}
+
+#[test]
+fn login_names_the_first_listed_products_resource_even_when_a_variable_names_a_product() {
+    let hosts = Hosts::start(device_auth(signed_in_tokens), accounts_api);
+    let named = FakeServer::start(with_description(accounts_api));
+
+    let run = hosts.run(&["login", "--device"], &[("MVDM_ALPHA_URL", &named.url())]);
+
+    assert_eq!(run.code, 0, "{run:#?}");
+    let device = hosts.auth_requests("/connect/device");
+    assert_eq!(device[0].form("resource"), Some(hosts.resource()));
+    for poll in hosts.auth_requests("/connect/token") {
+        assert_eq!(poll.form("resource"), Some(hosts.resource()));
+    }
+    assert_eq!(api_paths(&named), vec![ACCOUNTS_PATH]);
+}
+
+#[test]
+fn an_empty_product_list_is_a_local_discovery_failure_for_login() {
+    let auth = FakeServer::start(|request| {
+        auth_metadata(request)
+            .or_else(|| product_list(request, &[]))
+            .unwrap_or_else(|| Reply::empty(404))
+    });
+    let folder = tempfile::tempdir().expect("a folder");
+    let config = folder.path().to_string_lossy().into_owned();
+    let cache = folder.path().join("cache").to_string_lossy().into_owned();
+
+    let run = mvdm(
+        &["login", "--device"],
+        &[
+            ("MVDM_AUTH_URL", &auth.url()),
+            ("MVDM_CONFIG_DIR", &config),
+            ("MVDM_CACHE_DIR", &cache),
+        ],
+    );
+
+    assert_eq!(run.code, 1, "{run:#?}");
+    assert_eq!(run.stdout, "");
+    let error = run.stderr_json();
+    assert_eq!(error["error"], "discovery");
+    assert!(
+        error["message"].as_str().unwrap().contains("empty"),
+        "{error}"
+    );
+    assert!(!credentials_path(folder.path()).exists());
+}
+
+#[test]
+fn logout_revokes_without_the_product_list() {
+    let hosts = Hosts::start(
+        |request| match request.path() {
+            "/connect/revoke" => Reply::empty(200),
+            _ => Reply::empty(404),
+        },
+        ok_api,
+    );
+    hosts.store("access-1", unix_now() + 3600, "refresh-1");
+    hosts.list_down.store(true, Ordering::SeqCst);
+
+    let run = hosts.run(&["logout"], &[]);
+
+    assert_eq!(run.code, 0, "{run:#?}");
+    assert_eq!(hosts.auth_requests("/connect/revoke").len(), 1);
+    assert!(!credentials_path(hosts.config.path()).exists());
 }
 
 #[test]
@@ -467,7 +768,7 @@ fn logout_revokes_the_refresh_token_then_deletes_the_file() {
     );
     hosts.store("access-1", unix_now() + 3600, "refresh-1");
 
-    let run = hosts.run(&["logout"], &[("COMPLIANCE_TOKEN", "cmp_pat_test")]);
+    let run = hosts.run(&["logout"], &[("MVDM_TOKEN", "cmp_pat_test")]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(run.stdout_json(), json!({ "status": "logged_out" }));
@@ -507,15 +808,15 @@ fn logout_without_a_stored_sign_in_succeeds_without_a_request() {
 fn status_with_a_personal_token_names_it_and_the_current_account() {
     let hosts = Hosts::start(|_| Reply::empty(404), accounts_api);
 
-    let run = hosts.run(&["status"], &[("COMPLIANCE_TOKEN", "cmp_pat_test")]);
+    let run = hosts.run(&["status"], &[("MVDM_TOKEN", "cmp_pat_test")]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(
         run.stdout_json(),
         json!({
-            "host": hosts.host(),
+            "auth": hosts.auth.url(),
             "signedIn": true,
-            "credential": { "kind": "personal-token", "source": "COMPLIANCE_TOKEN" },
+            "credential": { "kind": "personal-token", "source": "MVDM_TOKEN" },
             "user": null,
             "account": { "id": 2, "name": "Beta", "current": true },
         })
@@ -556,7 +857,7 @@ fn status_without_a_credential_reports_signed_out_and_exits_0() {
     assert_eq!(
         run.stdout_json(),
         json!({
-            "host": hosts.host(),
+            "auth": hosts.auth.url(),
             "signedIn": false,
             "credential": null,
             "user": null,
@@ -571,7 +872,7 @@ fn status_with_a_rejected_credential_prints_the_problem_and_exits_1() {
     let problem = "{\"type\":\"unauthorized\",\"title\":\"Unauthorized\",\"status\":401}";
     let hosts = Hosts::start(|_| Reply::empty(404), move |_| Reply::problem(401, problem));
 
-    let run = hosts.run(&["status"], &[("COMPLIANCE_TOKEN", "cmp_pat_revoked")]);
+    let run = hosts.run(&["status"], &[("MVDM_TOKEN", "cmp_pat_revoked")]);
 
     assert_eq!(run.code, 1, "{run:#?}");
     assert_eq!(run.stdout, "");
@@ -582,16 +883,14 @@ fn status_with_a_rejected_credential_prints_the_problem_and_exits_1() {
 fn accounts_list_gets_the_accounts_and_prints_them() {
     let hosts = Hosts::start(|_| Reply::empty(404), accounts_api);
 
-    let run = hosts.run(
-        &["accounts", "list"],
-        &[("COMPLIANCE_TOKEN", "cmp_pat_test")],
-    );
+    let run = hosts.run(&["accounts", "list"], &[("MVDM_TOKEN", "cmp_pat_test")]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(run.stdout_json()["items"][1]["name"], "Beta");
     let request = &hosts.api_requests()[0];
     assert_eq!(request.method, "GET");
-    assert_eq!(request.url, "/api/v1/accounts");
+    assert_eq!(request.url, ACCOUNTS_PATH);
+    assert_eq!(request.header("Authorization"), Some("Bearer cmp_pat_test"));
 }
 
 #[test]
@@ -608,15 +907,16 @@ fn accounts_switch_posts_to_the_accounts_switch_and_prints_the_answer() {
 
     let run = hosts.run(
         &["accounts", "switch", "1"],
-        &[("COMPLIANCE_TOKEN", "cmp_pat_test")],
+        &[("MVDM_TOKEN", "cmp_pat_test")],
     );
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(run.stdout_json()["account"]["name"], "Alpha");
     let request = &hosts.api_requests()[0];
     assert_eq!(request.method, "POST");
-    assert_eq!(request.url, "/api/v1/accounts/1/switch");
+    assert_eq!(request.url, format!("{ACCOUNTS_PATH}/1/switch"));
     assert!(request.body.is_empty());
+    assert_eq!(request.header("Authorization"), Some("Bearer cmp_pat_test"));
 }
 
 #[test]
@@ -625,14 +925,114 @@ fn accounts_switch_needs_a_numeric_id() {
 
     let run = hosts.run(
         &["accounts", "switch", "alpha"],
-        &[("COMPLIANCE_TOKEN", "cmp_pat_test")],
+        &[("MVDM_TOKEN", "cmp_pat_test")],
     );
 
     assert_eq!(run.code, 2, "{run:#?}");
     assert!(hosts.compliance.requests().is_empty());
 }
 
-/// Starts `compliance login` with a launcher that claims to have opened the browser, and returns it with the
+/// A Product that serves `incomplete` as its description while `complete` is false, and the description with the
+/// Account operations moved once it is true.
+fn product_with_late_accounts(
+    incomplete: Value,
+    complete: Arc<AtomicBool>,
+) -> impl Fn(&Recorded) -> Reply + Send + Sync + 'static {
+    let incomplete = incomplete.to_string();
+    let complete_description = with_description(accounts_api);
+    move |request| {
+        if request.path() == DESCRIPTION_PATH && !complete.load(Ordering::SeqCst) {
+            Reply::json(200, &incomplete)
+        } else {
+            complete_description(request)
+        }
+    }
+}
+
+#[test]
+fn a_description_without_accounts_list_fails_status_and_is_refetched_once_to_find_it() {
+    let mut incomplete = description_with_accounts_moved();
+    let paths = incomplete["paths"].as_object_mut().expect("paths");
+    paths.remove(ACCOUNTS_PATH).expect("accounts.list");
+    let complete = Arc::new(AtomicBool::new(false));
+    let hosts = Hosts::start_serving(
+        tempfile::tempdir().expect("a config folder"),
+        |_| Reply::empty(404),
+        product_with_late_accounts(incomplete, Arc::clone(&complete)),
+    );
+    let token = [("MVDM_TOKEN", "cmp_pat_test")];
+
+    // A fresh fetch lacks the operation: nothing newer to fetch.
+    let missing = hosts.run(&["status"], &token);
+
+    assert_eq!(missing.code, 1, "{missing:#?}");
+    assert_eq!(missing.stdout, "");
+    let error = missing.stderr_json();
+    assert_eq!(error["error"], "discovery");
+    let message = error["message"].as_str().expect("a message");
+    assert!(message.contains("compliance"), "{message}");
+    assert!(message.contains("accounts.list"), "{message}");
+    assert_eq!(hosts.compliance.description_fetches(), 1);
+    assert!(hosts.api_requests().is_empty());
+
+    // The cached copy lacks it too: one refetch finds it where the Product now places it.
+    complete.store(true, Ordering::SeqCst);
+    let found = hosts.run(&["status"], &token);
+
+    assert_eq!(found.code, 0, "{found:#?}");
+    assert_eq!(found.stdout_json()["account"]["id"], 2);
+    assert_eq!(hosts.compliance.description_fetches(), 2);
+}
+
+#[test]
+fn a_switch_operation_without_one_path_parameter_is_a_discovery_failure() {
+    let mut document = description_with_accounts_moved();
+    document["paths"][format!("{ACCOUNTS_PATH}/{{accountId}}/switch")]["post"]["parameters"] =
+        json!([]);
+    let description = document.to_string();
+    let hosts = Hosts::start_serving(
+        tempfile::tempdir().expect("a config folder"),
+        |_| Reply::empty(404),
+        move |request| {
+            if request.path() == DESCRIPTION_PATH {
+                Reply::json(200, &description)
+            } else {
+                Reply::empty(404)
+            }
+        },
+    );
+
+    let run = hosts.run(
+        &["accounts", "switch", "1"],
+        &[("MVDM_TOKEN", "cmp_pat_test")],
+    );
+
+    assert_eq!(run.code, 1, "{run:#?}");
+    let error = run.stderr_json();
+    assert_eq!(error["error"], "discovery");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("accounts.switch"),
+        "{error}"
+    );
+    assert!(hosts.api_requests().is_empty());
+}
+
+#[test]
+fn two_account_commands_fetch_the_description_once() {
+    let hosts = Hosts::start(|_| Reply::empty(404), accounts_api);
+    let token = [("MVDM_TOKEN", "cmp_pat_test")];
+
+    assert_eq!(hosts.run(&["accounts", "list"], &token).code, 0);
+    assert_eq!(hosts.run(&["status"], &token).code, 0);
+
+    assert_eq!(hosts.compliance.description_fetches(), 1);
+    assert_eq!(hosts.api_requests().len(), 2);
+}
+
+/// Starts `mvdm login` with a launcher that claims to have opened the browser, and returns it with the
 /// `browser_opened` line it wrote first.
 #[cfg(target_os = "linux")]
 fn start_browser_login(hosts: &Hosts, launcher: &std::path::Path) -> (std::process::Child, Value) {
@@ -649,14 +1049,14 @@ fn start_browser_login(hosts: &Hosts, launcher: &std::path::Path) -> (std::proce
         launcher.display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    let host = hosts.host();
+    let auth = hosts.auth.url();
     let config = hosts.config.path().to_string_lossy().into_owned();
     let mut child = support::command(
         std::path::Path::new("."),
         &["login"],
         &[
-            ("COMPLIANCE_URL", host.as_str()),
-            ("COMPLIANCE_CONFIG_DIR", config.as_str()),
+            ("MVDM_AUTH_URL", auth.as_str()),
+            ("MVDM_CONFIG_DIR", config.as_str()),
             ("DISPLAY", ":99"),
             ("PATH", path.as_str()),
         ],
@@ -665,7 +1065,7 @@ fn start_browser_login(hosts: &Hosts, launcher: &std::path::Path) -> (std::proce
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .spawn()
-    .expect("start compliance login");
+    .expect("start mvdm login");
     let mut line = String::new();
     BufReader::new(child.stderr.take().expect("stderr"))
         .read_line(&mut line)
@@ -824,9 +1224,13 @@ fn an_invalid_grant_after_another_command_rotated_the_token_keeps_the_newer_sign
     let folder = config.path().to_path_buf();
     // Another command refreshed first: by the time Auth refuses this command's token, the file holds its successor.
     let auth = move |request: &Recorded| {
-        let resource = request.form("resource").expect("a resource");
-        let host = resource.strip_suffix("/api").expect("the API resource");
-        store_sign_in(&folder, host, "access-2", unix_now() + 3600, "refresh-2");
+        store_sign_in(
+            &folder,
+            &request.origin(),
+            "access-2",
+            unix_now() + 3600,
+            "refresh-2",
+        );
         oauth_error("invalid_grant")
     };
     let hosts = Hosts::start_in(config, auth, |request| {
@@ -838,7 +1242,7 @@ fn an_invalid_grant_after_another_command_rotated_the_token_keeps_the_newer_sign
     });
     hosts.store("access-1", unix_now(), "refresh-1");
 
-    let run = hosts.run(&["api", "GET", "/api/v1/risks"], &[]);
+    let run = hosts.run(&["compliance", "api", "GET", "/api/v1/risks"], &[]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(run.stdout_json(), json!({ "ok": 1 }));

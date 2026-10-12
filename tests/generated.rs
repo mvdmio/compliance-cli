@@ -2,14 +2,15 @@
 mod operations;
 mod support;
 
-use std::fs::{self, File};
+use std::fs;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use operations::{CommandName, live_operations};
+use operations::{CommandName, holds_chat, live_operations};
 use serde_json::{Value, json};
 use support::{
-    DESCRIPTION_PATH, FakeServer, Recorded, Reply, Run, TOKEN, body_json, compliance_in, fixture,
+    DESCRIPTION_PATH, FakeServer, Recorded, Reply, Run, TOKEN, body_json, closed_address, fixture,
+    mvdm_in, without_operations,
 };
 use tempfile::TempDir;
 
@@ -21,6 +22,8 @@ struct Host {
     server: FakeServer,
     description: Arc<Mutex<Option<Value>>>,
     cache: TempDir,
+    /// An Auth address nothing listens on, so a run never reaches the real one.
+    auth: String,
 }
 
 impl Host {
@@ -44,6 +47,7 @@ impl Host {
             server,
             description,
             cache: tempfile::tempdir().expect("a cache folder"),
+            auth: closed_address(),
         }
     }
 
@@ -58,31 +62,24 @@ impl Host {
     fn run_in(&self, dir: &std::path::Path, args: &[&str]) -> Run {
         let url = self.server.url();
         let cache = self.cache.path().to_str().expect("a UTF-8 path");
-        compliance_in(
+        mvdm_in(
             dir,
             args,
             &[
-                ("COMPLIANCE_URL", &url),
-                ("COMPLIANCE_TOKEN", TOKEN),
-                ("COMPLIANCE_CACHE_DIR", cache),
+                ("MVDM_COMPLIANCE_URL", &url),
+                ("MVDM_AUTH_URL", &self.auth),
+                ("MVDM_TOKEN", TOKEN),
+                ("MVDM_CACHE_DIR", cache),
             ],
         )
     }
 
     fn description_fetches(&self) -> usize {
-        self.server
-            .requests()
-            .iter()
-            .filter(|request| request.path() == DESCRIPTION_PATH)
-            .count()
+        self.server.description_fetches()
     }
 
     fn api_requests(&self) -> Vec<Recorded> {
-        self.server
-            .requests()
-            .into_iter()
-            .filter(|request| request.path() != DESCRIPTION_PATH)
-            .collect()
+        self.server.api_requests()
     }
 
     fn only_api_request(&self) -> Recorded {
@@ -93,14 +90,7 @@ impl Host {
 
     /// Makes every cached copy look `age` old.
     fn age_cache(&self, age: Duration) {
-        for entry in fs::read_dir(self.cache.path()).expect("the cache folder") {
-            let file = File::options()
-                .write(true)
-                .open(entry.expect("a cache entry").path())
-                .expect("open the cached copy");
-            file.set_modified(SystemTime::now() - age)
-                .expect("age the cached copy");
-        }
+        support::age_files(self.cache.path(), age);
     }
 }
 
@@ -122,7 +112,7 @@ fn with_operation(group_action: &str, path: &str) -> Value {
 fn an_action_with_a_path_parameter_sends_its_method_and_path() {
     let host = Host::start();
 
-    let run = host.run(&["risks", "accept", "r-1"]);
+    let run = host.run(&["compliance", "risks", "accept", "r-1"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(run.stdout_json(), json!({ "done": true }));
@@ -137,7 +127,13 @@ fn an_action_with_a_path_parameter_sends_its_method_and_path() {
 fn path_parameters_follow_the_path_order_and_are_encoded() {
     let host = Host::start();
 
-    let run = host.run(&["frameworks", "get-requirement", "iso 27001", "A.5/1"]);
+    let run = host.run(&[
+        "compliance",
+        "frameworks",
+        "get-requirement",
+        "iso 27001",
+        "A.5/1",
+    ]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(
@@ -151,6 +147,7 @@ fn odata_options_send_their_dollar_names() {
     let host = Host::start();
 
     let run = host.run(&[
+        "compliance",
         "risks",
         "list",
         "--filter",
@@ -171,7 +168,7 @@ fn odata_options_send_their_dollar_names() {
 fn an_integer_option_refuses_text_before_any_request() {
     let host = Host::start();
 
-    let run = host.run(&["risks", "list", "--top", "five"]);
+    let run = host.run(&["compliance", "risks", "list", "--top", "five"]);
 
     assert_eq!(run.code, 2, "{run:#?}");
     assert_eq!(run.stderr_json()["error"], "usage");
@@ -183,6 +180,7 @@ fn body_options_are_typed_from_the_schema() {
     let host = Host::start();
 
     let run = host.run(&[
+        "compliance",
         "risks",
         "create",
         "--title",
@@ -229,6 +227,7 @@ fn field_options_win_over_the_same_keys_in_body() {
     let host = Host::start();
 
     let run = host.run(&[
+        "compliance",
         "risks",
         "create",
         "--body",
@@ -250,7 +249,10 @@ fn body_reads_a_file() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("risk.json"), "{\"title\":\"From a file\"}").unwrap();
 
-    let run = host.run_in(dir.path(), &["risks", "create", "--body", "@risk.json"]);
+    let run = host.run_in(
+        dir.path(),
+        &["compliance", "risks", "create", "--body", "@risk.json"],
+    );
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(
@@ -263,8 +265,8 @@ fn body_reads_a_file() {
 fn a_required_body_with_no_input_is_an_empty_object_and_an_optional_one_is_left_out() {
     let host = Host::start();
 
-    let required = host.run(&["risks", "create"]);
-    let optional = host.run(&["risks", "update", "r1"]);
+    let required = host.run(&["compliance", "risks", "create"]);
+    let optional = host.run(&["compliance", "risks", "update", "r1"]);
 
     assert_eq!(required.code, 0, "{required:#?}");
     assert_eq!(optional.code, 0, "{optional:#?}");
@@ -279,8 +281,8 @@ fn a_required_body_with_no_input_is_an_empty_object_and_an_optional_one_is_left_
 fn an_enum_option_refuses_other_values_and_lists_them_in_help() {
     let host = Host::start();
 
-    let wrong = host.run(&["risks", "create", "--status", "Maybe"]);
-    let help = host.run(&["risks", "create", "--help"]);
+    let wrong = host.run(&["compliance", "risks", "create", "--status", "Maybe"]);
+    let help = host.run(&["compliance", "risks", "create", "--help"]);
 
     assert_eq!(wrong.code, 2, "{wrong:#?}");
     assert!(host.api_requests().is_empty());
@@ -294,6 +296,7 @@ fn a_clash_renames_the_later_option_and_help_says_so() {
     let host = Host::start();
 
     let run = host.run(&[
+        "compliance",
         "risks",
         "update",
         "r1",
@@ -304,7 +307,7 @@ fn a_clash_renames_the_later_option_and_help_says_so() {
         "--field-out",
         "Transfer",
     ]);
-    let help = host.run(&["risks", "update", "--help"]);
+    let help = host.run(&["compliance", "risks", "update", "--help"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     let request = host.api_requests().remove(0);
@@ -332,9 +335,9 @@ fn a_clash_renames_the_later_option_and_help_says_so() {
 fn help_on_an_action_shows_its_summary_description_and_parameters() {
     let host = Host::start();
 
-    let accept = host.run(&["risks", "accept", "--help"]);
-    let create = host.run(&["risks", "create", "--help"]);
-    let list = host.run(&["risks", "list", "--help"]);
+    let accept = host.run(&["compliance", "risks", "accept", "--help"]);
+    let create = host.run(&["compliance", "risks", "create", "--help"]);
+    let list = host.run(&["compliance", "risks", "list", "--help"]);
 
     assert_eq!(accept.code, 0, "{accept:#?}");
     for expected in [
@@ -373,7 +376,7 @@ fn help_on_an_action_shows_its_summary_description_and_parameters() {
 fn help_on_a_group_lists_its_actions_and_its_tags() {
     let host = Host::start();
 
-    let run = host.run(&["frameworks", "--help"]);
+    let run = host.run(&["compliance", "frameworks", "--help"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     for expected in [
@@ -387,31 +390,45 @@ fn help_on_a_group_lists_its_actions_and_its_tags() {
 }
 
 #[test]
-fn help_lists_the_hand_written_commands_and_the_generated_groups() {
+fn the_product_help_lists_the_hand_written_commands_and_the_generated_groups() {
+    let host = Host::start();
+
+    let run = host.run(&["compliance", "--help"]);
+
+    assert_eq!(run.code, 0, "{run:#?}");
+    for expected in ["api", "chat", "accounts", "risks", "frameworks", "evidence"] {
+        assert!(run.stdout.contains(expected), "{expected}: {}", run.stdout);
+    }
+    // The top-level commands are not the Product's.
+    assert!(!run.stdout.contains("login"), "{}", run.stdout);
+    assert!(!run.stdout.contains("logout"), "{}", run.stdout);
+}
+
+#[test]
+fn the_top_level_help_lists_a_product_a_variable_names_when_the_list_cannot_be_read() {
     let host = Host::start();
 
     let run = host.run(&["--help"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
-    for expected in [
-        "login",
-        "status",
-        "api",
-        "accounts",
-        "risks",
-        "frameworks",
-        "evidence",
-    ] {
+    for expected in ["login", "status", "accounts", "compliance"] {
         assert!(run.stdout.contains(expected), "{expected}: {}", run.stdout);
     }
+    assert!(!run.stdout.contains("risks"), "{}", run.stdout);
+    assert!(
+        run.stdout.contains("could not be read from Auth"),
+        "{}",
+        run.stdout
+    );
+    assert_eq!(host.description_fetches(), 0);
 }
 
 #[test]
 fn a_second_run_within_the_hour_uses_the_cached_copy() {
     let host = Host::start();
 
-    host.run(&["risks", "accept", "r1"]);
-    let second = host.run(&["risks", "accept", "r2"]);
+    host.run(&["compliance", "risks", "accept", "r1"]);
+    let second = host.run(&["compliance", "risks", "accept", "r2"]);
 
     assert_eq!(second.code, 0, "{second:#?}");
     assert_eq!(host.description_fetches(), 1);
@@ -420,11 +437,11 @@ fn a_second_run_within_the_hour_uses_the_cached_copy() {
 #[test]
 fn a_copy_older_than_an_hour_is_fetched_again() {
     let host = Host::start();
-    host.run(&["risks", "accept", "r1"]);
+    host.run(&["compliance", "risks", "accept", "r1"]);
     host.age_cache(Duration::from_secs(61 * 60));
 
-    let run = host.run(&["risks", "accept", "r2"]);
-    let after = host.run(&["risks", "accept", "r3"]);
+    let run = host.run(&["compliance", "risks", "accept", "r2"]);
+    let after = host.run(&["compliance", "risks", "accept", "r3"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(after.code, 0, "{after:#?}");
@@ -434,11 +451,11 @@ fn a_copy_older_than_an_hour_is_fetched_again() {
 #[test]
 fn a_stale_copy_is_used_when_the_fetch_fails() {
     let host = Host::start();
-    host.run(&["risks", "accept", "r1"]);
+    host.run(&["compliance", "risks", "accept", "r1"]);
     host.age_cache(Duration::from_secs(2 * 60 * 60));
     host.serve(None);
 
-    let run = host.run(&["risks", "accept", "r2"]);
+    let run = host.run(&["compliance", "risks", "accept", "r2"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(host.api_requests()[1].url, "/api/v1/risks/r2/accept");
@@ -449,7 +466,7 @@ fn no_copy_and_no_fetch_is_a_network_error() {
     let host = Host::start();
     host.serve(None);
 
-    let run = host.run(&["risks", "accept", "r1"]);
+    let run = host.run(&["compliance", "risks", "accept", "r1"]);
 
     assert_eq!(run.code, 1, "{run:#?}");
     assert_eq!(run.stderr_json()["error"], "network");
@@ -461,7 +478,7 @@ fn hand_written_commands_never_fetch_the_description() {
     let host = Host::start();
     host.serve(None);
 
-    let run = host.run(&["api", "GET", "/api/v1/risks"]);
+    let run = host.run(&["compliance", "api", "GET", "/api/v1/risks"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(host.description_fetches(), 0);
@@ -470,14 +487,14 @@ fn hand_written_commands_never_fetch_the_description() {
 #[test]
 fn an_operation_added_after_caching_works_through_the_refetch() {
     let host = Host::start();
-    host.run(&["risks", "accept", "r1"]);
+    host.run(&["compliance", "risks", "accept", "r1"]);
     host.serve(Some(with_operation(
         "risks.archive",
         "/api/v1/risks/{id}/archive",
     )));
 
-    let run = host.run(&["risks", "archive", "r1"]);
-    let again = host.run(&["risks", "archive", "r2"]);
+    let run = host.run(&["compliance", "risks", "archive", "r1"]);
+    let again = host.run(&["compliance", "risks", "archive", "r2"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(again.code, 0, "{again:#?}");
@@ -488,13 +505,13 @@ fn an_operation_added_after_caching_works_through_the_refetch() {
 #[test]
 fn a_new_group_works_through_the_refetch() {
     let host = Host::start();
-    host.run(&["risks", "accept", "r1"]);
+    host.run(&["compliance", "risks", "accept", "r1"]);
     host.serve(Some(with_operation(
         "suppliers.terminate",
         "/api/v1/suppliers/{id}/terminate",
     )));
 
-    let run = host.run(&["suppliers", "terminate", "s1"]);
+    let run = host.run(&["compliance", "suppliers", "terminate", "s1"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(host.api_requests()[1].url, "/api/v1/suppliers/s1/terminate");
@@ -503,10 +520,10 @@ fn a_new_group_works_through_the_refetch() {
 #[test]
 fn a_command_still_unknown_after_the_refetch_is_a_usage_mistake() {
     let host = Host::start();
-    host.run(&["risks", "accept", "r1"]);
+    host.run(&["compliance", "risks", "accept", "r1"]);
 
-    let action = host.run(&["risks", "explode", "r1"]);
-    let group = host.run(&["dragons", "list"]);
+    let action = host.run(&["compliance", "risks", "explode", "r1"]);
+    let group = host.run(&["compliance", "dragons", "list"]);
 
     assert_eq!(action.code, 2, "{action:#?}");
     assert_eq!(action.stderr_json()["error"], "usage");
@@ -516,17 +533,14 @@ fn a_command_still_unknown_after_the_refetch_is_a_usage_mistake() {
 }
 
 #[test]
-fn the_hand_written_accounts_list_wins_over_the_generated_one() {
+fn the_accounts_group_inside_a_product_is_generated_like_any_other() {
     let host = Host::start();
 
-    // The generated accounts.list takes --top; the hand-written one does not.
-    let hand_written = host.run(&["accounts", "list", "--top", "1"]);
-    let generated = host.run(&["accounts", "get", "7"]);
-    let help = host.run(&["accounts", "--help"]);
+    let list = host.run(&["compliance", "accounts", "list", "--top", "1"]);
+    let help = host.run(&["compliance", "accounts", "--help"]);
 
-    assert_eq!(hand_written.code, 2, "{hand_written:#?}");
-    assert_eq!(generated.code, 0, "{generated:#?}");
-    assert_eq!(host.only_api_request().url, "/api/v1/accounts/7");
+    assert_eq!(list.code, 0, "{list:#?}");
+    assert_eq!(host.only_api_request().url, "/api/v1/accounts?$top=1");
     for expected in ["list", "switch", "get", "Get an Account"] {
         assert!(
             help.stdout.contains(expected),
@@ -537,13 +551,75 @@ fn the_hand_written_accounts_list_wins_over_the_generated_one() {
 }
 
 #[test]
+fn the_hand_written_commands_of_a_group_hide_generated_ones_of_their_name() {
+    let host = Host::start();
+    let operation = |operation_id: &str| {
+        json!({
+            "post": {
+                "operationId": operation_id,
+                "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+                "responses": { "200": { "description": "OK", "content": { "application/json": {} } } }
+            }
+        })
+    };
+    let mut document = fixture();
+    document["paths"]["/api/v1/api/{id}"] = operation("api.run");
+    document["paths"]["/api/v1/chat/{id}/send"] = operation("chat.send");
+    document["paths"]["/api/v1/chat/{id}/history"] = operation("chat.history");
+    host.serve(Some(document));
+
+    let raw = host.run(&["compliance", "api", "GET", "/api/v1/risks"]);
+    let hidden_group = host.run(&["compliance", "api", "run", "x"]);
+    let chat_help = host.run(&["compliance", "chat", "--help"]);
+    let generated_action = host.run(&["compliance", "chat", "history", "c1"]);
+
+    assert_eq!(raw.code, 0, "{raw:#?}");
+    assert_eq!(hidden_group.code, 2, "{hidden_group:#?}");
+    assert_eq!(chat_help.code, 0, "{chat_help:#?}");
+    assert!(chat_help.stdout.contains("history"), "{}", chat_help.stdout);
+    assert!(
+        chat_help.stdout.contains("Send one message"),
+        "{}",
+        chat_help.stdout
+    );
+    assert_eq!(generated_action.code, 0, "{generated_action:#?}");
+    let urls: Vec<String> = host
+        .api_requests()
+        .into_iter()
+        .map(|request| request.url)
+        .collect();
+    assert_eq!(urls, ["/api/v1/risks", "/api/v1/chat/c1/history"]);
+}
+
+#[test]
+fn a_generated_chat_send_is_not_hidden_in_a_product_without_the_chat_operations() {
+    let host = Host::start();
+    host.serve(Some(without_operations(
+        with_operation("chat.send", "/api/v1/chat/{id}/send"),
+        &["conversations.create"],
+    )));
+
+    let run = host.run(&["compliance", "chat", "send", "c1"]);
+
+    assert_eq!(run.code, 0, "{run:#?}");
+    assert_eq!(host.only_api_request().url, "/api/v1/chat/c1/send");
+}
+
+#[test]
 fn a_download_writes_the_bytes_to_out_and_prints_a_summary() {
     let host = Host::start();
     let dir = tempfile::tempdir().unwrap();
 
     let run = host.run_in(
         dir.path(),
-        &["evidence", "download", "e1", "--out", "scan.pdf"],
+        &[
+            "compliance",
+            "evidence",
+            "download",
+            "e1",
+            "--out",
+            "scan.pdf",
+        ],
     );
 
     assert_eq!(run.code, 0, "{run:#?}");
@@ -564,7 +640,7 @@ fn a_download_writes_the_bytes_to_out_and_prints_a_summary() {
 fn a_download_without_out_is_a_usage_mistake_and_sends_no_request() {
     let host = Host::start();
 
-    let run = host.run(&["evidence", "download", "e1"]);
+    let run = host.run(&["compliance", "evidence", "download", "e1"]);
 
     assert_eq!(run.code, 2, "{run:#?}");
     assert_eq!(run.stderr_json()["error"], "usage");
@@ -575,7 +651,7 @@ fn a_download_without_out_is_a_usage_mistake_and_sends_no_request() {
 fn out_on_a_command_that_answers_json_is_a_usage_mistake() {
     let host = Host::start();
 
-    let run = host.run(&["risks", "accept", "r1", "--out", "risk.json"]);
+    let run = host.run(&["compliance", "risks", "accept", "r1", "--out", "risk.json"]);
 
     assert_eq!(run.code, 2, "{run:#?}");
     assert_eq!(run.stderr_json()["error"], "usage");
@@ -586,7 +662,7 @@ fn out_on_a_command_that_answers_json_is_a_usage_mistake() {
 fn an_upload_target_field_says_so_in_help() {
     let host = Host::start();
 
-    let run = host.run(&["evidence", "create", "--help"]);
+    let run = host.run(&["compliance", "evidence", "create", "--help"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert!(
@@ -613,12 +689,12 @@ fn a_generated_error_answer_keeps_the_exit_codes() {
         )
     });
 
-    let run = compliance_in(
+    let run = mvdm_in(
         &std::env::temp_dir(),
-        &["risks", "accept", "r1"],
+        &["compliance", "risks", "accept", "r1"],
         &[
-            ("COMPLIANCE_URL", &server.url()),
-            ("COMPLIANCE_TOKEN", TOKEN),
+            ("MVDM_COMPLIANCE_URL", &server.url()),
+            ("MVDM_TOKEN", TOKEN),
         ],
     );
 
@@ -630,8 +706,8 @@ fn a_generated_error_answer_keeps_the_exit_codes() {
 fn an_integer_enum_is_checked_and_sent_as_a_number() {
     let host = Host::start();
 
-    let wrong = host.run(&["risks", "create", "--impact", "4"]);
-    let right = host.run(&["risks", "create", "--impact", "2"]);
+    let wrong = host.run(&["compliance", "risks", "create", "--impact", "4"]);
+    let right = host.run(&["compliance", "risks", "create", "--impact", "2"]);
 
     assert_eq!(wrong.code, 2, "{wrong:#?}");
     assert_eq!(right.code, 0, "{right:#?}");
@@ -643,10 +719,12 @@ fn help_without_the_description_lists_the_hand_written_commands_and_says_what_is
     let host = Host::start();
     host.serve(None);
 
-    let run = host.run(&["--help"]);
+    let run = host.run(&["compliance", "--help"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
-    assert!(run.stdout.contains("login"), "{}", run.stdout);
+    assert!(run.stdout.contains("api"), "{}", run.stdout);
+    // `chat` needs the description to know the Product holds its operations.
+    assert!(!run.stdout.contains("chat"), "{}", run.stdout);
     assert!(!run.stdout.contains("risks"), "{}", run.stdout);
     assert!(
         run.stdout.contains("openapi/v1.json are missing"),
@@ -665,7 +743,7 @@ fn assert_ends_with_the_docs_address(host: &Host, run: &Run) {
 fn help_ends_with_the_docs_address_on_the_current_host() {
     let host = Host::start();
 
-    let run = host.run(&["--help"]);
+    let run = host.run(&["compliance", "--help"]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_ends_with_the_docs_address(&host, &run);
@@ -674,11 +752,11 @@ fn help_ends_with_the_docs_address_on_the_current_host() {
 #[test]
 fn an_unknown_command_with_a_failed_fetch_does_not_fetch_twice() {
     let host = Host::start();
-    host.run(&["risks", "accept", "r1"]);
+    host.run(&["compliance", "risks", "accept", "r1"]);
     host.age_cache(Duration::from_secs(2 * 60 * 60));
     host.serve(None);
 
-    let run = host.run(&["risks", "explode", "r1"]);
+    let run = host.run(&["compliance", "risks", "explode", "r1"]);
 
     assert_eq!(run.code, 2, "{run:#?}");
     assert_eq!(host.description_fetches(), 2);
@@ -711,7 +789,7 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
         // Hidden: an action named `help`, a group named `help`, and a hand-written command without actions.
         ("/api/v1/risks/help", "risks.help", "application/json"),
         ("/api/v1/help", "help.list", "application/json"),
-        ("/api/v1/status", "status.get", "application/json"),
+        ("/api/v1/api", "api.get", "application/json"),
     ] {
         document["paths"][path] = json!({
             "get": {
@@ -723,11 +801,13 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
 
     let mut predicted: Vec<(CommandName, bool)> = Vec::new();
     let mut hidden = Vec::new();
-    for operation in live_operations(&document) {
+    let live = live_operations(&document);
+    let holds_chat = holds_chat(&live);
+    for operation in live {
         let Some(command) = operation.command else {
             continue;
         };
-        if !command.is_generated() {
+        if !command.is_generated(holds_chat) {
             hidden.push(command);
         } else if !predicted.iter().any(|(earlier, _)| *earlier == command) {
             predicted.push((command, operation.download));
@@ -746,14 +826,15 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
     let hand_written = Host::start();
     hand_written.serve(None);
 
-    let root = listed_commands(&host.run(&["--help"]));
+    let root = listed_commands(&host.run(&["compliance", "--help"]));
     for group in &groups {
         assert!(
             root.iter().any(|listed| listed == group),
             "{group}: {root:?}"
         );
 
-        let mut expected: Vec<String> = listed_commands(&hand_written.run(&[group, "--help"]));
+        let mut expected: Vec<String> =
+            listed_commands(&hand_written.run(&["compliance", group, "--help"]));
         for (command, _) in predicted
             .iter()
             .filter(|(command, _)| command.group == *group)
@@ -762,12 +843,12 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
         }
         expected.sort();
         expected.dedup();
-        let mut listed = listed_commands(&host.run(&[group, "--help"]));
+        let mut listed = listed_commands(&host.run(&["compliance", group, "--help"]));
         listed.sort();
-        assert_eq!(listed, expected, "compliance {group} --help");
+        assert_eq!(listed, expected, "mvdm {group} --help");
     }
     for (command, download) in &predicted {
-        let run = host.run(&[&command.group, &command.action, "--help"]);
+        let run = host.run(&["compliance", &command.group, &command.action, "--help"]);
         assert_eq!(run.code, 0, "{command} --help: {run:#?}");
         let takes_out = run
             .stdout
@@ -776,7 +857,7 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
         assert_eq!(takes_out, *download, "{command} --help: {}", run.stdout);
     }
     for command in &hidden {
-        let listed = listed_commands(&host.run(&[&command.group, "--help"]));
+        let listed = listed_commands(&host.run(&["compliance", &command.group, "--help"]));
         assert!(
             !listed.contains(&command.action),
             "{command} is not hidden: {listed:?}"

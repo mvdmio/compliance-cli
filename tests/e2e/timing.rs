@@ -35,7 +35,7 @@ fn report() -> &'static Mutex<Report> {
 /// The Cargo target folder: the nearest folder above the built binary that holds Cargo's `CACHEDIR.TAG`, so a
 /// `--target <triple>` build still reports under `target/e2e/`.
 fn target_dir() -> PathBuf {
-    let binary = Path::new(env!("CARGO_BIN_EXE_compliance"));
+    let binary = Path::new(env!("CARGO_BIN_EXE_mvdm"));
     binary
         .ancestors()
         .find(|folder| folder.join("CACHEDIR.TAG").is_file())

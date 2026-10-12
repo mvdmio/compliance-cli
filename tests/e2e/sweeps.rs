@@ -7,7 +7,9 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::operations::{CommandName, LiveOperation, live_operations, placeholders};
+use crate::operations::{
+    CommandName, LiveOperation, PRODUCT, holds_chat, live_operations, placeholders,
+};
 use crate::support::Run;
 use crate::test_bed::Scenario;
 
@@ -16,6 +18,7 @@ use crate::test_bed::Scenario;
 fn help_sweep() {
     let scenario = Scenario::start("help sweep");
     let operations = live_operations(&scenario.test_bed().description());
+    let holds_chat = holds_chat(&operations);
 
     // Every generated command, once: two operations with one name are one command, and the CLI keeps the first.
     let mut commands: Vec<&CommandName> = Vec::new();
@@ -23,7 +26,7 @@ fn help_sweep() {
         .iter()
         .filter_map(|operation| operation.command.as_ref())
     {
-        if command.is_generated() && !commands.contains(&command) {
+        if command.is_generated(holds_chat) && !commands.contains(&command) {
             commands.push(command);
         }
     }
@@ -34,7 +37,7 @@ fn help_sweep() {
 
     let mut failures = Vec::new();
     for command in &commands {
-        let run = scenario.run(&[&command.group, &command.action, "--help"]);
+        let run = scenario.run(&[PRODUCT, &command.group, &command.action, "--help"]);
         if run.code != 0 || !run.stdout.contains("Usage:") {
             failures.push(format!(
                 "{command} --help: exit {}, stdout {:?}, stderr {:?}",
@@ -145,7 +148,7 @@ struct ReadSweep<'a> {
 }
 
 impl ReadSweep<'_> {
-    /// Runs `compliance <args>` once; a second call with the same arguments answers with the first run.
+    /// Runs `mvdm <args>` once; a second call with the same arguments answers with the first run.
     fn run(&mut self, args: Vec<String>) -> &Run {
         let scenario = self.scenario;
         self.runs.entry(args).or_insert_with_key(|args| {
@@ -154,8 +157,8 @@ impl ReadSweep<'_> {
         })
     }
 
-    /// Runs the read at `operations[index]` through its command. `accounts.list` needs no special case: its name
-    /// is the hand-written `accounts list`, which answers in place of the generated one.
+    /// Runs the read at `operations[index]` through its command. `accounts.list` needs no special case: inside the
+    /// Product's group it is a generated command like the others.
     fn check(&mut self, index: usize) -> Checked {
         let operation = &self.operations[index];
         let label = match &operation.command {
@@ -191,7 +194,7 @@ impl ReadSweep<'_> {
         }
         if !self.help_lists(command) {
             return Err(Verdict::Failed(format!(
-                "`compliance {} --help` does not list `{}`",
+                "`mvdm {PRODUCT} {} --help` does not list `{}`",
                 command.group, command.action
             )));
         }
@@ -218,7 +221,7 @@ impl ReadSweep<'_> {
 
     /// Runs one read. It passes on exit 0 and JSON on stdout, or, for a download, a non-empty file at `--out`.
     fn judge(&mut self, read: ReadCommand) -> Verdict {
-        let shown = format!("compliance {}", read.args.join(" "));
+        let shown = format!("mvdm {}", read.args.join(" "));
         let run = self.run(read.args);
         if run.code != 0 {
             return Verdict::Failed(format!(
@@ -239,9 +242,13 @@ impl ReadSweep<'_> {
         Verdict::Failed(format!("`{shown}` {problem}"))
     }
 
-    /// Whether `compliance <group> --help` lists the action under `Commands:`.
+    /// Whether `mvdm compliance <group> --help` lists the action under `Commands:`.
     fn help_lists(&mut self, command: &CommandName) -> bool {
-        let run = self.run(vec![command.group.clone(), "--help".to_string()]);
+        let run = self.run(vec![
+            PRODUCT.to_string(),
+            command.group.clone(),
+            "--help".to_string(),
+        ]);
         run.code == 0
             && run
                 .stdout
@@ -299,7 +306,7 @@ impl ReadSweep<'_> {
             args.push(value.clone());
         }
 
-        let shown = format!("compliance {}", args.join(" "));
+        let shown = format!("mvdm {}", args.join(" "));
         let run = self.run(args);
         let printed = match serde_json::from_str::<Value>(&run.stdout) {
             Ok(printed) if run.code == 0 => printed,

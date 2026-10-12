@@ -91,27 +91,46 @@ impl Kind {
 /// name as an earlier one is dropped.
 pub fn operations(document: &Value) -> Vec<Operation> {
     let mut operations: Vec<Operation> = Vec::new();
+    for (path, item, method, operation) in entries(document) {
+        let Some(operation) = read_operation(document, path, item, method, operation) else {
+            continue;
+        };
+        let taken = operations
+            .iter()
+            .any(|existing| existing.is_named(&operation.group, &operation.action));
+        if !taken {
+            operations.push(operation);
+        }
+    }
+    operations
+}
+
+/// The first operation whose `operationId` is exactly `id`, such as `accounts.list`, wherever the document places
+/// it.
+pub fn operation_by_id(document: &Value, id: &str) -> Option<Operation> {
+    entries(document)
+        .into_iter()
+        .filter(|(_, _, _, operation)| operation["operationId"] == id)
+        .find_map(|(path, item, method, operation)| {
+            read_operation(document, path, item, method, operation)
+        })
+}
+
+/// Every method of every path item, as (path, path item, method, operation), in document order.
+fn entries(document: &Value) -> Vec<(&str, &Value, &Method, &Value)> {
+    let mut entries = Vec::new();
     let Some(paths) = document["paths"].as_object() else {
-        return operations;
+        return entries;
     };
     for (path, item) in paths {
         let item = resolve(document, item);
         for (key, method) in &METHODS {
-            let Some(operation) = item.get(*key) else {
-                continue;
-            };
-            let Some(operation) = read_operation(document, path, item, method, operation) else {
-                continue;
-            };
-            let taken = operations
-                .iter()
-                .any(|existing| existing.is_named(&operation.group, &operation.action));
-            if !taken {
-                operations.push(operation);
+            if let Some(operation) = item.get(*key) {
+                entries.push((path.as_str(), item, method, operation));
             }
         }
     }
-    operations
+    entries
 }
 
 fn read_operation(

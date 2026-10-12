@@ -17,6 +17,7 @@ use crate::failure::{ErrorCode, Failure};
 use crate::http::{self, Client};
 use crate::oauth::{self, SCOPE};
 use crate::output;
+use crate::products;
 use crate::request::UNRESERVED;
 use crate::store::{self, SignIn};
 
@@ -27,11 +28,13 @@ const DEFAULT_DEVICE_INTERVAL: u64 = 5;
 const SLOW_DOWN_STEP: u64 = 5;
 const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
-/// `compliance login`: signs in through Auth, in the browser or with a device code, and stores the sign-in.
+/// `mvdm login`: signs in through Auth, in the browser or with a device code, and stores the sign-in.
 pub fn run(args: LoginArgs) -> Result<(), Failure> {
-    let host = config::host();
+    let auth = config::auth();
     let agent = http::agent();
-    let server = discovery::discover(&agent, &host)?;
+    let server = discovery::discover(&agent, &auth)?;
+    // Resolved before the sign-in, so a Product that cannot be found stores nothing.
+    let product = products::account_product()?;
 
     let browser = if args.device {
         None
@@ -42,14 +45,14 @@ pub fn run(args: LoginArgs) -> Result<(), Failure> {
         Some(sign_in) => sign_in,
         None => device_sign_in(&agent, &server)?,
     };
-    store::save(&host, &sign_in)?;
+    store::save(&auth, &sign_in)?;
 
     let user = sign_in.user.clone();
-    let mut client = Client::new(host.clone(), Credential::AgentConnection(sign_in));
-    let account = accounts::current(&mut client)?;
+    let mut client = Client::new(&product, Credential::AgentConnection(sign_in));
+    let account = accounts::current(&product, &mut client)?;
     output::print_json(&json!({
         "status": "logged_in",
-        "host": host,
+        "auth": auth,
         "user": user,
         "account": account,
     }));
@@ -131,7 +134,7 @@ fn wait_for_code(listener: &TcpListener, state: &str) -> Result<String, Failure>
     }
     Err(Failure::local(
         ErrorCode::LoginTimeout,
-        "No sign-in arrived within 5 minutes. Run `compliance login` again.",
+        "No sign-in arrived within 5 minutes. Run `mvdm login` again.",
     ))
 }
 
@@ -178,7 +181,7 @@ fn answer_callback(stream: TcpStream, state: &str) -> Option<Result<String, Fail
         Ok(_) => respond(
             &stream,
             "200 OK",
-            "You are signed in to the Compliance CLI. You can close this window.",
+            "You are signed in to the mvdm CLI. You can close this window.",
         ),
         Err(_) => respond(
             &stream,
@@ -191,7 +194,7 @@ fn answer_callback(stream: TcpStream, state: &str) -> Option<Result<String, Fail
 
 fn respond(mut stream: &TcpStream, status: &str, text: &str) {
     let page = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Compliance CLI</title></head><body><p>{text}</p></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>mvdm CLI</title></head><body><p>{text}</p></body></html>"
     );
     // Ignored: the browser may have gone; the terminal carries the outcome.
     let _ = write!(
@@ -263,7 +266,7 @@ fn device_sign_in(agent: &Agent, server: &AuthServer) -> Result<SignIn, Failure>
         if Instant::now() >= deadline {
             return Err(Failure::local(
                 ErrorCode::ExpiredToken,
-                "The device code expired before the sign-in finished. Run `compliance login` again.",
+                "The device code expired before the sign-in finished. Run `mvdm login` again.",
             ));
         }
         match oauth::request_tokens(agent, server, &form, None)? {

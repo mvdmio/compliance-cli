@@ -6,11 +6,12 @@ use ureq::http::uri::PathAndQuery;
 use crate::cli::ApiArgs;
 use crate::failure::Failure;
 use crate::http::Client;
+use crate::products::Product;
 use crate::request;
 use crate::response;
 
-/// `compliance api <method> <path>`: one raw call with the current credential.
-pub fn run(args: ApiArgs) -> Result<(), Failure> {
+/// `mvdm <product> api <method> <path>`: one raw call to the Product with the current credential.
+pub fn run(product: &Product, args: ApiArgs) -> Result<(), Failure> {
     let method = method(&args.method)?;
     if !args.path.starts_with('/') || PathAndQuery::from_str(&args.path).is_err() {
         return Err(Failure::Usage(format!(
@@ -20,7 +21,7 @@ pub fn run(args: ApiArgs) -> Result<(), Failure> {
     }
     let body = args.body.as_deref().map(request::body_bytes).transpose()?;
 
-    let mut client = Client::signed_in()?;
+    let mut client = Client::signed_in(product)?;
     let answer = client.send(&method, &args.path, body.as_deref())?;
     response::print_response(answer, args.out.as_deref())
 }

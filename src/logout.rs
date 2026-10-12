@@ -8,15 +8,15 @@ use crate::oauth;
 use crate::output;
 use crate::store;
 
-/// `compliance logout`: revokes the stored refresh token at Auth, which ends the Agent connection, then forgets
-/// the sign-in. The entry stays when Auth cannot be told, so the User can retry. `COMPLIANCE_TOKEN` is not touched.
+/// `mvdm logout`: revokes the stored refresh token at Auth, which ends the Agent connection, then forgets
+/// the sign-in. The entry stays when Auth cannot be told, so the User can retry. `MVDM_TOKEN` is not touched.
 pub fn run() -> Result<(), Failure> {
-    let host = config::host();
-    if let Some(sign_in) = store::load(&host)? {
+    let auth = config::auth();
+    if let Some(sign_in) = store::load(&auth)? {
         let agent = http::agent();
-        let server = discovery::discover(&agent, &host)?;
-        oauth::revoke(&agent, &server, &sign_in)?;
-        store::remove(&host)?;
+        let endpoint = discovery::revocation_endpoint(&agent, &auth)?;
+        oauth::revoke(&agent, &endpoint, &sign_in)?;
+        store::remove(&auth)?;
     }
     output::print_json(&json!({ "status": "logged_out" }));
     Ok(())

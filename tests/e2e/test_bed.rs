@@ -1,6 +1,6 @@
 //! The Test-bed the E2E suite runs against, and the Scenario that runs the binary on it.
 //!
-//! The Test-bed comes from `COMPLIANCE_E2E_URL` and `COMPLIANCE_E2E_TOKEN`. When both are unset, the suite runs the
+//! The Test-bed comes from `MVDM_E2E_URL` and `MVDM_E2E_TOKEN`. When both are unset, the suite runs the
 //! Launcher once per test process with `--until-stdin-closes` and holds its stdin open, so the Launcher stops and
 //! cleans up when the test process ends, however it ends.
 
@@ -62,18 +62,15 @@ fn test_bed() -> &'static TestBed {
 }
 
 fn find_or_start() -> Result<Shared, String> {
-    let url = env::var("COMPLIANCE_E2E_URL").ok();
-    let token = env::var("COMPLIANCE_E2E_TOKEN").ok();
+    let url = env::var("MVDM_E2E_URL").ok();
+    let token = env::var("MVDM_E2E_TOKEN").ok();
     match (url, token) {
         (Some(url), Some(token)) => Ok(Shared {
             test_bed: TestBed { url, token },
             _launcher: None,
         }),
         (None, None) => start_launcher(),
-        _ => Err(
-            "set both COMPLIANCE_E2E_URL and COMPLIANCE_E2E_TOKEN, or neither to start a Test-bed"
-                .into(),
-        ),
+        _ => Err("set both MVDM_E2E_URL and MVDM_E2E_TOKEN, or neither to start a Test-bed".into()),
     }
 }
 
@@ -147,22 +144,22 @@ impl Scenario {
         self.test_bed
     }
 
-    /// Runs `compliance <args>` against the Test-bed with its Personal token, and records the time it took.
+    /// Runs `mvdm <args>` against the Test-bed with its Personal token, and records the time it took.
     pub fn run(&self, args: &[&str]) -> Run {
         self.run_with_token(args, &self.test_bed.token)
     }
 
-    /// Runs `compliance <args>` against the Test-bed with `token` in place of its Personal token.
+    /// Runs `mvdm <args>` against the Test-bed with `token` in place of its Personal token.
     pub fn run_with_token(&self, args: &[&str], token: &str) -> Run {
         let env = [
-            ("COMPLIANCE_URL", self.test_bed.url.as_str()),
-            ("COMPLIANCE_TOKEN", token),
+            ("MVDM_COMPLIANCE_URL", self.test_bed.url.as_str()),
+            ("MVDM_TOKEN", token),
         ];
         // The config folder is also the working folder, so a file a command writes stays inside the Scenario.
         let folder = self.config.path();
         let mut command = command(folder, args, &env, folder);
         let started = Instant::now();
-        let output = command.output().expect("run the compliance binary");
+        let output = command.output().expect("run the mvdm binary");
         let elapsed = started.elapsed();
         let run = Run::from_output(output);
         timing::record(self.name, args, run.code, elapsed);

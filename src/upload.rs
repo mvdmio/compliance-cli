@@ -11,21 +11,25 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use ureq::Agent;
-use ureq::http::{Method, Response, header};
+use ureq::http::{Response, header};
 
 use crate::failure::{ErrorCode, Failure};
 use crate::generated::UploadSlot;
 use crate::http::{self, Client};
+use crate::openapi::Operation;
 use crate::response;
 
-const UPLOADS_PATH: &str = "/api/v1/uploads";
+/// The operation that issues an Upload link, found by its ID in the Product's OpenAPI document.
+pub const CREATE: &str = "uploads.create";
 /// Tries in a row that move no byte forward before the upload gives up.
 const MAX_STALLED_TRIES: u32 = 5;
 
 /// Uploads every file in `paths` through its own Upload link for `slot` and returns the upload ids: a list when
-/// the slot takes one, else the one id. Every file is opened before the first request.
+/// the slot takes one, else the one id. Every file is opened before the first request, and each link is requested
+/// with `create`, the Product's `uploads.create`.
 pub fn send_all(
     client: &mut Client,
+    create: &Operation,
     slot: &UploadSlot,
     paths: &[&PathBuf],
 ) -> Result<Value, Failure> {
@@ -35,7 +39,7 @@ pub fn send_all(
         .collect::<Result<Vec<_>, _>>()?;
     let mut ids = Vec::new();
     for source in sources {
-        ids.push(send(client, slot.target, source)?);
+        ids.push(send(client, create, slot.target, source)?);
     }
     Ok(if slot.parameter.schema.array {
         Value::Array(ids)
@@ -78,11 +82,16 @@ impl<'a> Source<'a> {
 }
 
 /// Uploads `source` to a new Upload link for `target` and returns the link's upload id.
-fn send(client: &mut Client, target: &str, source: Source) -> Result<Value, Failure> {
+fn send(
+    client: &mut Client,
+    create: &Operation,
+    target: &str,
+    source: Source,
+) -> Result<Value, Failure> {
     let request = json!({ "target": target, "fileName": source.file_name });
     let answer = client.send(
-        &Method::POST,
-        UPLOADS_PATH,
+        &create.method,
+        &create.path,
         Some(request.to_string().as_bytes()),
     )?;
     let link = Link::read(&response::read_json(answer)?, client.host())?;
@@ -109,7 +118,7 @@ fn send(client: &mut Client, target: &str, source: Source) -> Result<Value, Fail
     Ok(link.upload_id)
 }
 
-/// The answer of `POST /api/v1/uploads`.
+/// The answer of `uploads.create`.
 struct Link {
     url: String,
     upload_id: Value,

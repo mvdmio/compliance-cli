@@ -7,8 +7,9 @@ use ureq::http::{HeaderMap, Method, Request, Response, StatusCode, header};
 use crate::config;
 use crate::credential::{self, Credential};
 use crate::failure::{ErrorCode, Failure};
+use crate::products::Product;
 
-const USER_AGENT: &str = concat!("compliance-cli/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!("mvdm-cli/", env!("CARGO_PKG_VERSION"));
 const MAX_RATE_LIMIT_RETRIES: usize = 3;
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(1);
 /// A stored access token this close to its expiry is refreshed before the call.
@@ -50,28 +51,30 @@ pub fn read_answer(
     Ok((response.status(), bytes))
 }
 
-/// Calls one Compliance host with one credential. A stored sign-in is refreshed when its access token is about to
-/// expire, and once more on a 401.
+/// Calls one Product's host with one credential. A stored sign-in is refreshed at Auth when its access token is
+/// about to expire, and once more on a 401.
 pub struct Client {
     agent: Agent,
     host: String,
+    /// The Auth address that holds the stored sign-in and refreshes it.
+    auth: String,
     credential: Credential,
 }
 
 impl Client {
-    pub fn new(host: String, credential: Credential) -> Self {
+    pub fn new(product: &Product, credential: Credential) -> Self {
         Client {
             agent: agent(),
-            host,
+            host: product.base_url.clone(),
+            auth: config::auth(),
             credential,
         }
     }
 
-    /// A client for the configured host with the credential in use; `not-signed-in` without one.
-    pub fn signed_in() -> Result<Self, Failure> {
-        let host = config::host();
-        let credential = credential::require(&host)?;
-        Ok(Client::new(host, credential))
+    /// A client for `product` with the credential in use; `not-signed-in` without one.
+    pub fn signed_in(product: &Product) -> Result<Self, Failure> {
+        let credential = credential::require(&config::auth())?;
+        Ok(Client::new(product, credential))
     }
 
     pub fn host(&self) -> &str {
@@ -106,7 +109,7 @@ impl Client {
 
     fn refresh(&mut self) -> Result<(), Failure> {
         if let Credential::AgentConnection(sign_in) = &self.credential {
-            let refreshed = credential::refresh(&self.agent, &self.host, sign_in)?;
+            let refreshed = credential::refresh(&self.agent, &self.auth, sign_in)?;
             self.credential = Credential::AgentConnection(refreshed);
         }
         Ok(())

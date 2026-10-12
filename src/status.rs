@@ -6,13 +6,14 @@ use crate::credential::{self, Credential};
 use crate::failure::Failure;
 use crate::http::Client;
 use crate::output;
+use crate::products;
 
-/// `compliance status`: the host, the credential in use, who it acts as, and in which Account.
+/// `mvdm status`: the Auth address, the credential in use, who it acts as, and in which Account.
 pub fn run() -> Result<(), Failure> {
-    let host = config::host();
-    let Some(credential) = credential::find(&host)? else {
+    let auth = config::auth();
+    let Some(credential) = credential::find(&auth)? else {
         output::print_json(&json!({
-            "host": host,
+            "auth": auth,
             "signedIn": false,
             "credential": null,
             "user": null,
@@ -21,8 +22,9 @@ pub fn run() -> Result<(), Failure> {
         return Ok(());
     };
 
-    let mut client = Client::new(host.clone(), credential);
-    let account = accounts::current(&mut client)?;
+    let product = products::account_product()?;
+    let mut client = Client::new(&product, credential);
+    let account = accounts::current(&product, &mut client)?;
     let credential = client.credential();
     // A Personal token carries no `id_token`, so only a stored sign-in knows the User.
     let user = match credential {
@@ -30,7 +32,7 @@ pub fn run() -> Result<(), Failure> {
         Credential::PersonalToken(_) => Value::Null,
     };
     output::print_json(&json!({
-        "host": host,
+        "auth": auth,
         "signedIn": true,
         "credential": { "kind": credential.kind(), "source": credential.source() },
         "user": user,
