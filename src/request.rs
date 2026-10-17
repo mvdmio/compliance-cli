@@ -20,11 +20,6 @@ pub fn path_segment(text: &str) -> String {
     utf8_percent_encode(text, UNRESERVED).to_string()
 }
 
-/// `path` with its `{name}` placeholder replaced by `value` as one path segment.
-pub fn fill_placeholder(path: &str, name: &str, value: &str) -> String {
-    path.replace(&format!("{{{name}}}"), &path_segment(value))
-}
-
 /// `--body` as bytes: inline JSON, or `@path` to read it from a file. It must parse, so a typo fails before the
 /// call.
 pub fn body_bytes(text: &str) -> Result<Vec<u8>, Failure> {

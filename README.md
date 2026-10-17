@@ -1,92 +1,72 @@
-# mvdm
+# compliance
 
-`mvdm` is a command-line tool for the REST APIs of the [mvdm.io](https://auth.mvdm.io) Products. One binary and one
-sign-in serve every Product that offers an API. It is built for people who script the Products from a terminal, and
-for their Agents (Claude Code, Codex, Gemini CLI, and others) that run shell commands. Every command prints JSON,
-and the exit code says what happened.
+`compliance` is a command-line tool for the [Compliance](https://compliance.mvdm.io) REST API. It is built for
+people who script Compliance from a terminal, and for their Agents (Claude Code, Codex, Gemini CLI, and others)
+that run shell commands. Every command prints JSON, and the exit code says what happened.
 
-The CLI talks to Auth and to the Products' REST APIs only. It collects no usage data and sends none: no telemetry,
-no crash reports, no update checks.
+For the full setup steps, read the [CLI guide](https://compliance.mvdm.io/agents/cli).
+
+The CLI talks to the Compliance REST API only. It collects no usage data and sends none: no telemetry, no
+crash reports, no update checks.
 
 ## Install
 
 Linux and macOS:
 
 ```sh
-curl -LsSf https://auth.mvdm.io/cli/install.sh | sh
+curl -LsSf https://compliance.mvdm.io/cli/install.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://auth.mvdm.io/cli/install.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm https://compliance.mvdm.io/cli/install.ps1 | iex"
 ```
 
-The installer puts the `mvdm` binary in `~/.cargo/bin` (or `$CARGO_HOME/bin`) and tells you if that folder is not
-on your `PATH`. Builds exist for Linux (x64 and arm64, static), macOS (arm64 and x64), and Windows (x64).
+The installer puts the `compliance` binary in `~/.cargo/bin` (or `$CARGO_HOME/bin`) and tells you if that folder
+is not on your `PATH`. Builds exist for Linux (x64 and arm64, static), macOS (arm64 and x64), and Windows (x64).
 
-Run the install line again to upgrade: the CLI never updates itself. `mvdm --version` shows the build you run.
-
-## Products and commands
-
-A Product is a mvdm.io service whose REST API the CLI offers. The CLI learns which Products exist from a public
-list that Auth serves, so a new Product needs no CLI release.
-
-```sh
-mvdm --help                  # the Products and the top-level commands
-mvdm <product> --help        # that Product's commands, ending with the address of its guides
-mvdm <product> <group> --help
-```
-
-The layout of commands:
-
-- `mvdm login`, `mvdm logout`, `mvdm status`, `mvdm accounts list`, `mvdm accounts switch <id>`, `mvdm skill`, and
-  `mvdm --version` sit at the top level, because one sign-in acts in one Account for every Product.
-- Everything else sits under a Product's name: `mvdm <product> <group> <action>`, `mvdm <product> api <method>
-  <path>`, and `mvdm <product> chat send` where the Product offers its Assistant.
-
-A top-level command hides a Product of the same name.
+Run the install line again to upgrade: the CLI never updates itself. `compliance --version` shows the build you
+run.
 
 ## For Agents
 
 ```sh
-mvdm skill
+compliance skill
 ```
 
 `skill` prints one Markdown skill file that teaches an Agent when and how to use the CLI: signing in, command
-names, exit codes, files, a Product's Assistant, and Browser handoffs. It names no Product. It is the only command
-whose output is not JSON. Give it to your Agent as a skill, or let the Agent run it. The same file is
-[`SKILL.md`](SKILL.md) in this repo.
+names, exit codes, files, our Assistant, and Browser handoffs. It is the only command whose output is not JSON.
+Give it to your Agent as a skill, or let the Agent run it. The same file is [`SKILL.md`](SKILL.md) in this repo.
 
 ## Sign in
 
 ```sh
-mvdm login
+compliance login
 ```
 
 `login` opens your browser at Auth. Sign in there and allow the CLI; the terminal then prints
-`{"status":"logged_in","auth":…,"user":{"name":…,"email":…},"account":{…}}`. While it waits, stderr holds
-`{"status":"browser_opened","authorizeUrl":…}`, so you can open the link by hand. It gives up after 5 minutes. You
-sign in once: the connection reaches every listed Product.
+`{"status":"logged_in","host":…,"user":{"name":…,"email":…},"account":{…}}`. While it waits, stderr holds
+`{"status":"browser_opened","authorizeUrl":…}`, so you can open the link by hand. It gives up after 5 minutes.
 
 On a machine without a browser, such as a server over SSH, use the device code. `login` falls back to it by
 itself when it cannot open a browser.
 
 ```sh
-mvdm login --device
+compliance login --device
 ```
 
 stderr then holds `{"status":"device_code","verificationUriComplete":…,"verificationUri":…,"userCode":…,"expiresIn":…}`.
 Open the link on any device and sign in there. The CLI waits until you have.
 
-The CLI finds Auth at `https://auth.mvdm.io`, or at `MVDM_AUTH_URL`, and reads its endpoints from
-`/.well-known/openid-configuration`.
+The CLI finds Auth by itself, through the host's Protected Resource Metadata. You only ever set the Compliance
+host.
 
 A sign-in is an Agent connection: it acts as you, in one of your Accounts at a time. The CLI renews its access
-token by itself. When the connection has ended, commands fail with `not-signed-in`; run `mvdm login` again.
+token by itself. When the connection has ended, commands fail with `not-signed-in`; run `compliance login` again.
 
 ```sh
-mvdm logout
+compliance logout
 ```
 
 `logout` ends the Agent connection at Auth, so it stops working everywhere, and then forgets the sign-in. If Auth
@@ -94,77 +74,63 @@ cannot be reached, the sign-in stays, and you can run `logout` again.
 
 ### Stored sign-in
 
-The sign-in is stored in `credentials.json`, in the `mvdm` folder of your config folder:
+The sign-in is stored in `credentials.json`, in the `compliance` folder of your config folder:
 
 | OS | Folder |
 | -- | ------ |
-| Linux | `$XDG_CONFIG_HOME/mvdm` or `~/.config/mvdm` |
-| macOS | `~/Library/Application Support/mvdm` |
-| Windows | `%APPDATA%\mvdm` |
+| Linux | `$XDG_CONFIG_HOME/compliance` or `~/.config/compliance` |
+| macOS | `~/Library/Application Support/compliance` |
+| Windows | `%APPDATA%\compliance` |
 
-`MVDM_CONFIG_DIR` sets another folder. The file holds one sign-in per Auth address, so a sign-in at another Auth
+`COMPLIANCE_CONFIG_DIR` sets another folder. The file holds one sign-in per host, so a sign-in on another host
 sits beside it. On Linux and macOS, only you can read it (mode 0600).
 
 ### Personal token
 
-For unattended jobs, such as CI, set `MVDM_TOKEN` to a Personal token. You create Personal tokens on the API &
-Agent Access page of your account; the CLI never creates them. `MVDM_TOKEN` always wins over the stored sign-in,
-serves every Product, and `logout` leaves it alone.
+For unattended jobs, such as CI, set `COMPLIANCE_TOKEN` to a Personal token. You create Personal tokens on the API
+& Agent Access page of your account; the CLI never creates them. `COMPLIANCE_TOKEN` always wins over the stored
+sign-in, and `logout` leaves it alone.
 
 ```sh
-export MVDM_TOKEN=...
-mvdm <product> api GET /api/v1/risks
+export COMPLIANCE_TOKEN=...
+compliance api GET /api/v1/risks
 ```
-
-### Another host for one Product
-
-`MVDM_<NAME>_URL` sets one Product's base URL and wins over Auth's list. `<NAME>` is the Product's command name in
-capitals. With it, the Product's other addresses use the default paths: `/openapi/v1.json`, `/api`, and
-`/agents` (the CLI does not talk to MCP).
-A Product named only by such a variable works without Auth, with a Personal token. A failed fetch of Auth's list
-then fails only a command for a Product no variable names. This is how a developer runs the CLI against
-a local build.
 
 ## Status and Accounts
 
 ```sh
-mvdm status
+compliance status
 ```
 
 `status` shows who you are and where commands land:
-`{"auth":…,"signedIn":…,"credential":{"kind":…,"source":…},"user":…,"account":…}`. The credential kind is
-`personal-token` or `agent-connection`, and the source is `MVDM_TOKEN` or `stored sign-in`. `user` comes from the
-sign-in, so it is `null` with a Personal token: the API has no call that names the User. Without a credential it
-prints `"signedIn": false` and exits 0.
+`{"host":…,"signedIn":…,"credential":{"kind":…,"source":…},"user":…,"account":…}`. The credential
+kind is `personal-token` or `agent-connection`, and the source is `COMPLIANCE_TOKEN` or `stored sign-in`. `user`
+comes from the sign-in, so it is `null` with a Personal token: the API has no call that names the User. Without
+a credential it prints `"signedIn": false` and exits 0.
 
 ```sh
-mvdm accounts list
-mvdm accounts switch 42
+compliance accounts list
+compliance accounts switch 42
 ```
 
 `accounts list` lists your Accounts, the current one marked `"current": true`. `accounts switch <id>` moves the
-credential into another Account, for every later command in every Product and for everyone who uses that
-credential.
-
-`status` and `accounts` call the Account operations `accounts.list` and `accounts.switch` of the first Product a
-`MVDM_<NAME>_URL` variable names, in name order, or else of the first listed Product. Every Product hosts the same
-Account operations, and they skip the License check, so the first Product serves you whatever your Licenses.
+credential into another Account, for every later command and for everyone who uses that credential.
 
 ## Commands from the API
 
-Every REST operation of a Product is a command. The CLI builds these commands when it runs, from the Product's
-OpenAPI description (`/openapi/v1.json` by default), so a new operation shows up without a new CLI release.
+Every REST operation is a command. The CLI builds these commands when it runs, from the host's OpenAPI description
+at `/openapi/v1.json`, so a new operation shows up without a new CLI release.
 
 ```sh
-mvdm <product> risks list --filter "status eq 'Open'" --top 5
-mvdm <product> risks accept 3f2c9a
-mvdm <product> risks create --title Flood --likelihood 3
-mvdm <product> evidence download 8d1e --out scan.pdf
+compliance risks list --filter "status eq 'Open'" --top 5
+compliance risks accept 3f2c9a
+compliance risks create --title Flood --likelihood 3
+compliance evidence download 8d1e --out scan.pdf
 ```
 
-- **Names.** An operation's `operationId` `<group>.<action>` becomes `mvdm <product> <group> <action>`, both in
-  kebab-case. So `risks.accept` is `mvdm <product> risks accept`. The group comes from the `operationId`, not from
-  the tag: `mvdm <product> <group> --help` lists the tags its actions carry.
+- **Names.** An operation's `operationId` `<group>.<action>` becomes `compliance <group> <action>`, both in
+  kebab-case. So `risks.accept` is `compliance risks accept`. The group comes from the `operationId`, not from the
+  tag: `compliance <group> --help` lists the tags its actions carry.
 - **Arguments.** Path parameters are positional arguments, in path order. Query parameters are options, with the
   OData `$` dropped: `--filter`, `--select`, `--orderby`, `--expand`, `--top`, `--skip`. The top-level fields of a
   JSON body are options too, kebab-cased (`collectedAt` is `--collected-at`) and typed from the schema: numbers
@@ -176,23 +142,24 @@ mvdm <product> evidence download 8d1e --out scan.pdf
   body field `out` is `--field-out`), and the option's help says so.
 - **Downloads.** An operation that answers a file, not JSON, needs `--out <path>`. Without it, the command is a
   usage mistake and sends nothing. Only these operations have `--out`.
-- **Help.** `mvdm --help` lists the Products. `mvdm <product> --help` lists the hand-written commands and the
-  groups of that Product, and ends with `Docs: <its guides address>`. `mvdm <product> <group> --help` lists its
-  actions, and `mvdm <product> <group> <action> --help` shows the operation's summary, its description, and every
+- **Help.** `compliance --help` lists the hand-written commands and the groups. `compliance <group> --help` lists
+  its actions, and `compliance <group> <action> --help` shows the operation's summary, its description, and every
   argument with its type.
 
-Inside a Product, the hand-written commands (`api`, and `chat send` where the Product offers it) win over a
-generated command of the same name. Other actions in the same group stay reachable.
+The hand-written commands (`login`, `logout`, `status`, `accounts list`, `accounts switch`, `chat send`, `api`,
+`skill`, and `--version`) never need the description, and win over a generated command of the same name. Other actions in the
+same group, such as a generated `accounts get`, stay reachable. A hand-written command without actions, such as `status`, hides a generated
+group of the same name.
 
 ### Files
 
-An operation that takes an upload id, and that sits in a Product whose description holds `uploads.create`, also
-takes `--file <path>`. The CLI sends the file first and then makes the call with the new upload id. `--file` and the
-upload id option cannot be given together.
+An operation that takes an upload id, such as `evidence create --upload-id`, also takes `--file <path>`. The CLI
+sends the file first and then makes the call with the new upload id. `--file` and the upload id option cannot be
+given together.
 
 ```sh
-mvdm <product> evidence create --file scan.pdf --title "Scan"
-mvdm <product> conversations send-message 12 --text "See these" --file a.pdf --file b.png
+compliance evidence create --file scan.pdf --title "Scan"
+compliance conversations send-message 12 --text "See these" --file a.pdf --file b.png
 ```
 
 - **Lists.** Where the operation takes a list of upload ids, such as `uploadIds`, `--file` repeats. Each file
@@ -207,71 +174,67 @@ mvdm <product> conversations send-message 12 --text "See these" --file a.pdf --f
 - **The credential stays home.** The Upload link needs no bearer, so the CLI sends none to it.
 - stdout holds only the result of the final call. The CLI prints no upload progress.
 
-### The cached lists
+### The cached description
 
-The CLI keeps a copy of Auth's Product list per Auth address, and of each Product's description per Product address, in the
-`mvdm` folder of your cache folder:
+The CLI keeps a copy of the description per host, in the `compliance` folder of your cache folder:
 
 | OS | Folder |
 | -- | ------ |
-| Linux | `$XDG_CACHE_HOME/mvdm` or `~/.cache/mvdm` |
-| macOS | `~/Library/Caches/mvdm` |
-| Windows | `%LOCALAPPDATA%\mvdm` |
+| Linux | `$XDG_CACHE_HOME/compliance` or `~/.cache/compliance` |
+| macOS | `~/Library/Caches/compliance` |
+| Windows | `%LOCALAPPDATA%\compliance` |
 
-`MVDM_CACHE_DIR` sets another folder. A copy younger than one hour is used as it is. An older one is fetched again;
-if that fails, the old copy is used. With no copy and no answer, a command that needs it fails with `discovery`
-(the Product list) or `network` (a description).
+`COMPLIANCE_CACHE_DIR` sets another folder. A copy younger than one hour is used as it is. An older one is
+fetched again; if that fails, the old copy is used. With no copy and no answer from the host, a generated command
+fails with `network`.
 
-A new Product or operation reaches you by itself. When you type a Product, group, or action the copy does not know,
-the CLI fetches a fresh copy at once, even within the hour. If the command is still unknown, it is a usage mistake
-(exit 2).
+A new operation reaches you by itself. When you type a group or action the copy does not know, the CLI fetches a
+fresh copy at once, even within the hour. If the command is still unknown, it is a usage mistake (exit 2).
 
-## Talk to a Product's Assistant
+## Talk to our Assistant
 
 ```sh
-mvdm <product> chat send "Which risks are still open?"
+compliance chat send "Which risks are still open?"
 ```
 
-`chat` appears in a Product's group when its description holds the conversation operations
-(`conversations.create`, `conversations.send-message`, `conversations.list-messages`). `chat send "<text>"` sends
-one message to the Product's Assistant, as a person does in the Assistant panel, and waits until its turn ends.
-Without `--conversation <id>`, it starts a new conversation. It then prints:
+`chat send "<text>"` sends one message to our Assistant, as a person does in the Assistant panel, and waits
+until its turn ends. Without `--conversation <id>`, it starts a new conversation. It then prints:
 
 ```json
 {"conversationId":"…","lastError":null,"queued":false,"messages":[…]}
 ```
 
 - `messages` holds every message after the one you sent, oldest first, as the API gives it: `seq`, `role`,
-  `sender`, the markdown `text`, `attachments`, and `toolActivity` (the tools the Assistant ran, each with its
+  `sender`, the markdown `text`, `attachments`, and `toolActivity` (the tools our Assistant ran, each with its
   outcome).
-- `conversationId` is the conversation your message landed in. When the Assistant judges it a new topic, this is
+- `conversationId` is the conversation your message landed in. When our Assistant judges it a new topic, this is
   a new conversation, not the one you named. Continue with that id.
 - `lastError` says why the turn stopped early, when it did.
 - `queued` is true when your message went into a shared conversation while another member's turn was running.
-  The Assistant answers it in the turn after that one, so `messages` may hold only that member's reply. Read the
-  answer later with `mvdm <product> conversations list-messages <conversationId> --after <seq> --wait 60`.
+  Our Assistant answers it in the turn after that one, so `messages` may hold only that member's reply. Read the
+  answer later with `compliance conversations list-messages <conversationId> --after <seq> --wait 60`.
 
-**Answer a question or proposal.** The Assistant asks and proposes in the text of its messages. Answer with the
+**Answer a question or proposal.** Our Assistant asks and proposes in the text of its messages. Answer with the
 next `chat send`, passing the printed `conversationId`:
 
 ```sh
-mvdm <product> chat send "Yes, go ahead." --conversation <conversationId>
+compliance chat send "Yes, go ahead." --conversation <conversationId>
 ```
 
 An empty Assistant allowance (402 `allowance-exhausted`) or a conversation that cannot take a message now (409)
 prints the ProblemDetails on stderr and exits 1. For everything else about conversations, such as listing them or
-stopping a turn, use the generated `mvdm <product> conversations …` commands.
+stopping a turn, use the generated `compliance conversations …` commands.
 
 ## Raw calls
 
-`mvdm <product> api <method> <path>` makes one call to that Product with your credential. The path is relative to
-the Product's host, and a query string rides in it.
+`compliance api <method> <path>` makes one call with your credential. The path is relative to the host, and a
+query string rides in it.
 
 ```sh
-mvdm <product> api GET '/api/v1/risks?$top=5'
-mvdm <product> api POST /api/v1/risks --body '{"title":"Flood"}'
-mvdm <product> api PATCH /api/v1/risks/r1 --body @risk.json
-mvdm <product> api GET /api/v1/reports/q3 --out q3.pdf
+compliance api GET '/api/v1/risks?$top=5'
+compliance api POST /api/v1/risks --body '{"title":"Flood"}'
+compliance api PATCH /api/v1/risks/r1 --body @risk.json
+compliance api GET /api/v1/reports/q3 --out q3.pdf
 ```
 
 - `--body <json|@file>` sends a JSON body, inline or read from a file.
@@ -283,7 +246,7 @@ mvdm <product> api GET /api/v1/reports/q3 --out q3.pdf
 - stdout holds the JSON result: pretty-printed in a terminal, compact otherwise. An empty success prints
   `{"ok":true,"status":<code>}`.
 - stderr holds errors: the API's ProblemDetails as it came, or `{"error":"<code>","message":"…"}` for a failure
-  on your side, such as `not-signed-in`, `network`, `discovery`, `file`, `upload`, or `binary-response`.
+  on your side, such as `not-signed-in`, `network`, `file`, `upload`, or `binary-response`.
 - On a rate limit (429) the CLI waits for `Retry-After` and retries, up to three times.
 
 ## Exit codes
@@ -295,27 +258,17 @@ mvdm <product> api GET /api/v1/reports/q3 --out q3.pdf
 | 2 | Usage mistake: fix the command line. |
 | 3 | Browser handoff: a person must finish the act in the browser. |
 
-A Browser handoff, from any Product, prints `{"status":"browser_handoff","reason":…,"handoffUrl":…}` on stdout.
-Show the link to a person; the CLI never opens a browser for it.
+A Browser handoff prints `{"status":"browser_handoff","reason":…,"handoffUrl":…}` on stdout. Show the link to a
+person; the CLI never opens a browser for it.
 
 ## Environment
 
 | Variable | Meaning |
 | -------- | ------- |
-| `MVDM_TOKEN` | A Personal token, sent as the bearer to every Product. Wins over the stored sign-in. |
-| `MVDM_AUTH_URL` | Auth's address. Defaults to `https://auth.mvdm.io`. |
-| `MVDM_<NAME>_URL` | One Product's base URL, such as `MVDM_COMPLIANCE_URL`. Wins over Auth's list. |
-| `MVDM_CONFIG_DIR` | The folder for the stored sign-in. |
-| `MVDM_CACHE_DIR` | The folder for the cached Product list and API descriptions. |
-
-## Develop
-
-Plain `cargo test` runs the tests against in-process fake Auth and Product hosts. The E2E suite runs the binary
-against a Test-bed: a real Compliance built from the `mvdmio-suite` monorepo, with its own throwaway database.
-`scripts/test-bed.sh` starts one and prints `{"url": "...", "token": "..."}`; put the two values in
-`MVDM_COMPLIANCE_URL` and `MVDM_TOKEN` to run `mvdm compliance …` against it. `cargo test --test e2e -- --ignored`
-runs the suite, and uses a Test-bed you already run when `MVDM_E2E_URL` and `MVDM_E2E_TOKEN` are set. The
-repository is `mvdmio/mvdm-cli`. See [AGENTS.md](AGENTS.md) for the details.
+| `COMPLIANCE_TOKEN` | A Personal token, sent as the bearer. Wins over the stored sign-in. |
+| `COMPLIANCE_URL` | The Compliance host. Defaults to `https://compliance.mvdm.io`. |
+| `COMPLIANCE_CONFIG_DIR` | The folder for the stored sign-in. |
+| `COMPLIANCE_CACHE_DIR` | The folder for the cached API description. |
 
 ## Licence
 

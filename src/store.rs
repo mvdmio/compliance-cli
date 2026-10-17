@@ -15,7 +15,7 @@ const FILE_NAME: &str = "credentials.json";
 const LOCK_WAIT: Duration = Duration::from_secs(5);
 const LOCK_POLL: Duration = Duration::from_millis(20);
 
-/// One Auth address's stored sign-in: an Agent connection's tokens and who signed in.
+/// One host's stored sign-in: an Agent connection's tokens and who signed in.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignIn {
@@ -37,45 +37,45 @@ struct Credentials {
     hosts: BTreeMap<String, SignIn>,
 }
 
-/// `MVDM_CONFIG_DIR`, else `mvdm/` in the user's config folder.
+/// `COMPLIANCE_CONFIG_DIR`, else `compliance/` in the user's config folder.
 pub fn folder() -> Result<PathBuf, Failure> {
-    match env::var_os("MVDM_CONFIG_DIR") {
+    match env::var_os("COMPLIANCE_CONFIG_DIR") {
         Some(dir) if !dir.is_empty() => Ok(PathBuf::from(dir)),
         _ => dirs::config_dir()
-            .map(|dir| dir.join("mvdm"))
+            .map(|dir| dir.join("compliance"))
             .ok_or_else(|| {
                 Failure::local(
                     ErrorCode::Config,
-                    "Found no config folder for the stored sign-in. Set MVDM_CONFIG_DIR.",
+                    "Found no config folder for the stored sign-in. Set COMPLIANCE_CONFIG_DIR.",
                 )
             }),
     }
 }
 
-pub fn load(auth: &str) -> Result<Option<SignIn>, Failure> {
-    Ok(read(&path()?)?.hosts.remove(auth))
+pub fn load(host: &str) -> Result<Option<SignIn>, Failure> {
+    Ok(read(&path()?)?.hosts.remove(host))
 }
 
-pub fn save(auth: &str, sign_in: &SignIn) -> Result<(), Failure> {
+pub fn save(host: &str, sign_in: &SignIn) -> Result<(), Failure> {
     update(|credentials| {
-        credentials.hosts.insert(auth.to_string(), sign_in.clone());
+        credentials.hosts.insert(host.to_string(), sign_in.clone());
     })
 }
 
-/// Removes the Auth address's entry, and the file once it holds none.
-pub fn remove(auth: &str) -> Result<(), Failure> {
+/// Removes the host's entry, and the file once it holds none.
+pub fn remove(host: &str) -> Result<(), Failure> {
     update(|credentials| {
-        credentials.hosts.remove(auth);
+        credentials.hosts.remove(host);
     })
 }
 
-/// Removes the Auth address's entry when it still holds `refresh_token`. When another process has meanwhile stored a
+/// Removes the host's entry when it still holds `refresh_token`. When another process has meanwhile stored a
 /// newer sign-in, that one stays and is returned.
-pub fn remove_ended(auth: &str, refresh_token: &str) -> Result<Option<SignIn>, Failure> {
+pub fn remove_ended(host: &str, refresh_token: &str) -> Result<Option<SignIn>, Failure> {
     update(|credentials| {
-        let current = credentials.hosts.get(auth)?;
+        let current = credentials.hosts.get(host)?;
         if current.refresh_token.as_deref() == Some(refresh_token) {
-            credentials.hosts.remove(auth);
+            credentials.hosts.remove(host);
             return None;
         }
         Some(current.clone())
@@ -163,7 +163,7 @@ fn read(path: &Path) -> Result<Credentials, Failure> {
         Failure::local(
             ErrorCode::Credentials,
             format!(
-                "{} does not parse ({error}). Delete it and run `mvdm login`.",
+                "{} does not parse ({error}). Delete it and run `compliance login`.",
                 path.display()
             ),
         )

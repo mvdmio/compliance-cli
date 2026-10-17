@@ -139,38 +139,7 @@
         }
       }
     },
-    "/api/v1/conversations": {
-      "post": {
-        "tags": ["Conversations"],
-        "summary": "Start a conversation",
-        "operationId": "conversations.create",
-        "responses": { "201": { "description": "Created", "content": { "application/json": { "schema": { "type": "object" } } } } }
-      }
-    },
-    "/api/v1/uploads": {
-      "post": {
-        "tags": ["Uploads"],
-        "summary": "Request an Upload link",
-        "operationId": "uploads.create",
-        "requestBody": {
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UploadCreate" } } },
-          "required": true
-        },
-        "responses": { "201": { "description": "Created", "content": { "application/json": { "schema": { "type": "object" } } } } }
-      }
-    },
     "/api/v1/conversations/{id}/messages": {
-      "get": {
-        "tags": ["Conversations"],
-        "summary": "List messages",
-        "operationId": "conversations.list-messages",
-        "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "after", "in": "query", "schema": { "type": "integer" } },
-          { "name": "wait", "in": "query", "schema": { "type": "integer" } }
-        ],
-        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } }
-      },
       "post": {
         "tags": ["Conversations"],
         "summary": "Send a message",
@@ -204,19 +173,6 @@
         "operationId": "accounts.list",
         "parameters": [
           { "name": "$top", "in": "query", "schema": { "type": ["integer", "string"], "pattern": "^-?(?:0|[1-9]\\d*)$" } }
-        ],
-        "responses": {
-          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
-        }
-      }
-    },
-    "/api/v1/accounts/{accountId}/switch": {
-      "post": {
-        "tags": ["Accounts"],
-        "summary": "Switch to an Account",
-        "operationId": "accounts.switch",
-        "parameters": [
-          { "name": "accountId", "in": "path", "required": true, "schema": { "type": "integer" } }
         ],
         "responses": {
           "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
@@ -278,14 +234,6 @@
             "items": { "type": "string", "format": "uuid" },
             "x-upload-target": "conversation"
           }
-        }
-      },
-      "UploadCreate": {
-        "type": "object",
-        "required": ["target", "fileName"],
-        "properties": {
-          "target": { "type": "string" },
-          "fileName": { "type": "string" }
         }
       },
       "EvidenceCreate": {

@@ -4,23 +4,18 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use serde_json::{Value, json};
-use support::{
-    FakeServer, Recorded, Reply, THREADS_PATH, description_with_chat_and_uploads_moved,
-    mvdm_with_token, serving, without_operations,
-};
+use support::{FakeServer, Recorded, Reply, compliance_with_token};
 
 const CREATED: &str = "c0ffee00-0000-4000-8000-000000000001";
 const SPLIT: &str = "5b1170ff-0000-4000-8000-000000000002";
 
-/// Plays the three conversation operations at the paths the description gives them (under `/v2/threads`, not
-/// `/api/v1/conversations`). The send answers `send`; each read answers the next of `reads`.
+/// Plays the three conversation operations. The send answers `send`; each read answers the next of `reads`.
 fn conversations(send: Reply, reads: Vec<Value>) -> FakeServer {
     let send = Mutex::new(Some(send));
     let reads = Mutex::new(VecDeque::from(reads));
-    FakeServer::start(serving(
-        description_with_chat_and_uploads_moved(),
+    FakeServer::start(
         move |request: &Recorded| match (request.method.as_str(), request.path()) {
-            ("POST", THREADS_PATH) => Reply::json(
+            ("POST", "/api/v1/conversations") => Reply::json(
                 201,
                 &json!({ "id": CREATED, "turnState": "idle", "lastError": null }).to_string(),
             ),
@@ -33,7 +28,7 @@ fn conversations(send: Reply, reads: Vec<Value>) -> FakeServer {
             }
             _ => Reply::problem(404, "{\"status\":404}"),
         },
-    ))
+    )
 }
 
 fn sent(conversation_id: &str, seq: i64) -> Reply {
@@ -72,12 +67,12 @@ fn message(seq: i64, text: &str) -> Value {
 }
 
 fn chat(server: &FakeServer, args: &[&str]) -> support::Run {
-    mvdm_with_token(server, &[&["compliance", "chat", "send"], args].concat())
+    compliance_with_token(server, &[&["chat", "send"], args].concat())
 }
 
 fn calls(server: &FakeServer) -> Vec<String> {
     server
-        .api_requests()
+        .requests()
         .iter()
         .map(|request| format!("{} {}", request.method, request.url))
         .collect()
@@ -106,12 +101,12 @@ fn without_a_conversation_it_starts_one_sends_and_reads_until_idle() {
     assert_eq!(
         calls(&server),
         [
-            "POST /v2/threads".to_string(),
-            format!("POST /v2/threads/{CREATED}/messages"),
-            format!("GET /v2/threads/{CREATED}/messages?after=3&wait=60"),
+            "POST /api/v1/conversations".to_string(),
+            format!("POST /api/v1/conversations/{CREATED}/messages"),
+            format!("GET /api/v1/conversations/{CREATED}/messages?after=3&wait=60"),
         ]
     );
-    let requests = server.api_requests();
+    let requests = server.requests();
     assert_eq!(requests[0].body, b"{}");
     assert_eq!(requests[1].body, b"{\"text\":\"hi\"}");
     assert!(
@@ -145,9 +140,9 @@ fn a_reply_over_several_reads_prints_every_new_message_once_in_order() {
     assert_eq!(
         reads,
         [
-            format!("GET /v2/threads/{CREATED}/messages?after=7&wait=60"),
-            format!("GET /v2/threads/{CREATED}/messages?after=8&wait=60"),
-            format!("GET /v2/threads/{CREATED}/messages?after=8&wait=60"),
+            format!("GET /api/v1/conversations/{CREATED}/messages?after=7&wait=60"),
+            format!("GET /api/v1/conversations/{CREATED}/messages?after=8&wait=60"),
+            format!("GET /api/v1/conversations/{CREATED}/messages?after=8&wait=60"),
         ]
     );
 }
@@ -162,8 +157,8 @@ fn with_a_conversation_none_is_started() {
     assert_eq!(
         calls(&server),
         [
-            format!("POST /v2/threads/{CREATED}/messages"),
-            format!("GET /v2/threads/{CREATED}/messages?after=1&wait=60"),
+            format!("POST /api/v1/conversations/{CREATED}/messages"),
+            format!("GET /api/v1/conversations/{CREATED}/messages?after=1&wait=60"),
         ]
     );
 }
@@ -183,7 +178,7 @@ fn a_topic_split_conversation_is_the_one_read_and_printed() {
     assert_eq!(run.stdout_json()["messages"], json!([reply]));
     assert_eq!(
         calls(&server).last().unwrap(),
-        &format!("GET /v2/threads/{SPLIT}/messages?after=1&wait=60")
+        &format!("GET /api/v1/conversations/{SPLIT}/messages?after=1&wait=60")
     );
 }
 
@@ -197,7 +192,7 @@ fn an_exhausted_allowance_exits_1_with_the_problem_details() {
     assert_eq!(run.code, 1, "{run:#?}");
     assert_eq!(run.stdout, "");
     assert_eq!(run.stderr.trim_end(), problem);
-    assert_eq!(server.api_requests().len(), 1);
+    assert_eq!(server.requests().len(), 1);
 }
 
 #[test]
@@ -240,84 +235,34 @@ fn a_rate_limited_read_is_retried() {
     let reply = message(2, "Done.");
     let limited = Mutex::new(true);
     let idle = read(CREATED, "idle", vec![reply.clone()]).to_string();
-    let server = FakeServer::start(serving(
-        description_with_chat_and_uploads_moved(),
-        move |request: &Recorded| match request.method.as_str() {
-            "POST" => sent(CREATED, 1),
-            _ if std::mem::replace(&mut *limited.lock().unwrap(), false) => {
-                Reply::problem(429, "{\"status\":429}").header("Retry-After", "0")
-            }
-            _ => Reply::json(200, &idle),
-        },
-    ));
+    let server = FakeServer::start(move |request: &Recorded| match request.method.as_str() {
+        "POST" => sent(CREATED, 1),
+        _ if std::mem::replace(&mut *limited.lock().unwrap(), false) => {
+            Reply::problem(429, "{\"status\":429}").header("Retry-After", "0")
+        }
+        _ => Reply::json(200, &idle),
+    });
 
     let run = chat(&server, &["hi", "--conversation", CREATED]);
 
     assert_eq!(run.code, 0, "{run:#?}");
     assert_eq!(run.stdout_json()["messages"], json!([reply]));
-    assert_eq!(server.api_requests().len(), 3);
+    assert_eq!(server.requests().len(), 3);
 }
 
 #[test]
-fn chat_send_reads_the_description_once_and_calls_the_paths_it_gives() {
+fn chat_send_never_reads_the_api_description() {
     let server = conversations(sent(CREATED, 1), vec![read(CREATED, "idle", vec![])]);
 
-    let run = chat(&server, &["hi"]);
+    let run = chat(&server, &["hi", "--conversation", CREATED]);
 
     assert_eq!(run.code, 0, "{run:#?}");
-    let fetches = server.description_fetches();
-    assert_eq!(fetches, 1);
-    // None of the fixture's own paths is called.
     assert!(
         server
-            .api_requests()
+            .requests()
             .iter()
-            .all(|request| request.path().starts_with(THREADS_PATH))
+            .all(|request| request.path() != support::DESCRIPTION_PATH)
     );
-}
-
-#[test]
-fn a_product_whose_description_lacks_a_conversation_operation_has_no_chat() {
-    for missing in [
-        "conversations.create",
-        "conversations.send-message",
-        "conversations.list-messages",
-    ] {
-        let server = FakeServer::start(serving(
-            without_operations(description_with_chat_and_uploads_moved(), &[missing]),
-            |_: &Recorded| Reply::json(200, "{}"),
-        ));
-
-        let help = mvdm_with_token(&server, &["compliance", "--help"]);
-        let run = chat(&server, &["hi"]);
-
-        assert_eq!(help.code, 0, "{missing}: {help:#?}");
-        assert!(!help.stdout.contains("chat"), "{missing}: {}", help.stdout);
-        assert_eq!(run.code, 2, "{missing}: {run:#?}");
-        assert_eq!(run.stderr_json()["error"], "usage", "{missing}");
-        assert!(server.api_requests().is_empty(), "{missing}");
-    }
-}
-
-#[test]
-fn a_product_whose_description_holds_the_conversation_operations_lists_chat() {
-    let server = conversations(sent(CREATED, 1), vec![]);
-
-    let help = mvdm_with_token(&server, &["compliance", "--help"]);
-
-    assert_eq!(help.code, 0, "{help:#?}");
-    assert!(help.stdout.contains("chat"), "{}", help.stdout);
-    assert!(server.api_requests().is_empty());
-}
-
-#[test]
-fn chat_send_with_the_description_down_is_a_network_error() {
-    let server = FakeServer::start(|_: &Recorded| Reply::empty(503));
-
-    let run = chat(&server, &["hi"]);
-
-    assert_eq!(run.code, 1, "{run:#?}");
-    assert_eq!(run.stderr_json()["error"], "network");
 }
 
 #[test]

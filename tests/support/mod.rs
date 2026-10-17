@@ -1,4 +1,4 @@
-//! Drives the built `mvdm` binary against in-process fake Auth and Product hosts.
+//! Drives the built `compliance` binary against in-process fake Compliance and Auth hosts.
 
 #![allow(dead_code)]
 
@@ -174,19 +174,6 @@ impl FakeServer {
         self.requests.lock().unwrap().clone()
     }
 
-    /// The requests for the Product's API, not the ones for its description.
-    pub fn api_requests(&self) -> Vec<Recorded> {
-        self.requests()
-            .into_iter()
-            .filter(|request| request.path() != DESCRIPTION_PATH)
-            .collect()
-    }
-
-    /// How many times the Product's description was fetched.
-    pub fn description_fetches(&self) -> usize {
-        self.requests().len() - self.api_requests().len()
-    }
-
     pub fn only_request(&self) -> Recorded {
         let requests = self.requests();
         assert_eq!(requests.len(), 1, "requests: {requests:#?}");
@@ -232,30 +219,30 @@ impl Run {
     }
 }
 
-/// The Personal token the tests pass in `MVDM_TOKEN`.
+/// The Personal token the tests pass in `COMPLIANCE_TOKEN`.
 pub const TOKEN: &str = "cmp_pat_test";
 
-/// Runs `mvdm <args>` against `server` with the Personal token `TOKEN`.
-pub fn mvdm_with_token(server: &FakeServer, args: &[&str]) -> Run {
-    mvdm(
+/// Runs `compliance <args>` against `server` with the Personal token `TOKEN`.
+pub fn compliance_with_token(server: &FakeServer, args: &[&str]) -> Run {
+    compliance(
         args,
         &[
-            ("MVDM_COMPLIANCE_URL", &server.url()),
-            ("MVDM_TOKEN", TOKEN),
+            ("COMPLIANCE_URL", &server.url()),
+            ("COMPLIANCE_TOKEN", TOKEN),
         ],
     )
 }
 
-/// Runs `mvdm <args>` with only the given `MVDM_*` variables set.
-pub fn mvdm(args: &[&str], env: &[(&str, &str)]) -> Run {
-    mvdm_in(Path::new("."), args, env)
+/// Runs `compliance <args>` with only the given `COMPLIANCE_*` variables set.
+pub fn compliance(args: &[&str], env: &[(&str, &str)]) -> Run {
+    compliance_in(Path::new("."), args, env)
 }
 
-pub fn mvdm_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
+pub fn compliance_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
     let config = tempfile::tempdir().expect("a temporary config folder");
     let output = command(dir, args, env, config.path())
         .output()
-        .expect("run the mvdm binary");
+        .expect("run the compliance binary");
     Run::from_output(output)
 }
 
@@ -263,18 +250,18 @@ pub fn mvdm_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
 /// and `config/cache` as the cache folder unless `env` names them, so the stored sign-in and cached API
 /// description of the person running the tests stay out.
 pub fn command(dir: &Path, args: &[&str], env: &[(&str, &str)], config: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_mvdm"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_compliance"));
     command.current_dir(dir).args(args);
     for (name, _) in std::env::vars() {
-        if name.starts_with("MVDM_") {
+        if name.starts_with("COMPLIANCE_") {
             command.env_remove(name);
         }
     }
     for name in ["DISPLAY", "WAYLAND_DISPLAY"] {
         command.env_remove(name);
     }
-    command.env("MVDM_CONFIG_DIR", config);
-    command.env("MVDM_CACHE_DIR", config.join("cache"));
+    command.env("COMPLIANCE_CONFIG_DIR", config);
+    command.env("COMPLIANCE_CACHE_DIR", config.join("cache"));
     command.envs(env.iter().copied());
     command
 }
@@ -286,129 +273,18 @@ pub fn fixture() -> Value {
     serde_json::from_str(include_str!("../fixtures/openapi.json")).expect("the fixture is JSON")
 }
 
-/// Where the fake Products place the Account operations: not the fixture's `/api/v1/accounts`, so a test proves
-/// the CLI follows the description by operation ID.
-pub const ACCOUNTS_PATH: &str = "/api/v2/me/accounts";
+pub const RESOURCE_PATH: &str = "/api";
 
-/// The fixture with `accounts.list` and `accounts.switch` moved under `ACCOUNTS_PATH`.
-pub fn description_with_accounts_moved() -> Value {
-    fixture_with_paths_moved([
-        ("/api/v1/accounts", ACCOUNTS_PATH.to_string()),
-        (
-            "/api/v1/accounts/{accountId}/switch",
-            format!("{ACCOUNTS_PATH}/{{accountId}}/switch"),
-        ),
-    ])
-}
-
-/// The fixture with each path of `moves` moved to the path beside it.
-fn fixture_with_paths_moved<const N: usize>(moves: [(&str, String); N]) -> Value {
-    let mut document = fixture();
-    let paths = document["paths"].as_object_mut().expect("paths");
-    for (from, to) in moves {
-        let item = paths.remove(from).expect("an operation to move");
-        paths.insert(to, item);
-    }
-    document
-}
-
-/// A fake Product that serves `description_with_accounts_moved` and leaves every other request to `api`.
-pub fn with_description(
-    api: impl Fn(&Recorded) -> Reply + Send + Sync + 'static,
-) -> impl Fn(&Recorded) -> Reply + Send + Sync + 'static {
-    serving(description_with_accounts_moved(), api)
-}
-
-/// A fake Product that serves `description` and leaves every other request to `api`.
-pub fn serving(
-    description: Value,
-    api: impl Fn(&Recorded) -> Reply + Send + Sync + 'static,
-) -> impl Fn(&Recorded) -> Reply + Send + Sync + 'static {
-    let description = description.to_string();
-    move |request| {
-        if request.path() == DESCRIPTION_PATH {
-            Reply::json(200, &description)
-        } else {
-            api(request)
-        }
-    }
-}
-
-/// Where the fake Products place `conversations.create`, and under it the other two conversation operations
-/// (`THREADS_PATH/{id}/messages`): not the fixture's `/api/v1/conversations`, so a test proves the CLI follows the
-/// description by operation ID.
-pub const THREADS_PATH: &str = "/v2/threads";
-
-/// Where the fake Products place `uploads.create`, not the fixture's `/api/v1/uploads`.
-pub const UPLOAD_LINKS_PATH: &str = "/v2/files/links";
-
-/// The fixture with the conversation operations under `THREADS_PATH` and `uploads.create` at `UPLOAD_LINKS_PATH`.
-pub fn description_with_chat_and_uploads_moved() -> Value {
-    fixture_with_paths_moved([
-        ("/api/v1/conversations", THREADS_PATH.to_string()),
-        (
-            "/api/v1/conversations/{id}/messages",
-            format!("{THREADS_PATH}/{{id}}/messages"),
-        ),
-        ("/api/v1/uploads", UPLOAD_LINKS_PATH.to_string()),
-    ])
-}
-
-/// `document` without the operations whose `operationId` is in `ids`.
-pub fn without_operations(mut document: Value, ids: &[&str]) -> Value {
-    for item in document["paths"]
-        .as_object_mut()
-        .expect("paths")
-        .values_mut()
-    {
-        let item = item.as_object_mut().expect("a path item");
-        item.retain(|_, operation| {
-            !operation["operationId"]
-                .as_str()
-                .is_some_and(|id| ids.contains(&id))
+/// Compliance's Protected Resource Metadata, naming `auth` as the authorization server.
+pub fn resource_metadata(request: &Recorded, auth: &str) -> Option<Reply> {
+    (request.path() == "/.well-known/oauth-protected-resource/api").then(|| {
+        let body = json!({
+            "resource": format!("{}{RESOURCE_PATH}", request.origin()),
+            "authorization_servers": [auth],
+            "bearer_methods_supported": ["header"],
         });
-    }
-    document
-}
-
-pub const LIST_PATH: &str = "/agent-access/apps";
-
-/// One item of Auth's Product list, with the default paths on `base_url`.
-pub fn listed_product(name: &str, base_url: &str) -> Value {
-    json!({
-        "name": name,
-        "displayName": name.to_uppercase(),
-        "baseUrl": base_url,
-        "apiResource": format!("{base_url}/api"),
-        "openApi": format!("{base_url}{DESCRIPTION_PATH}"),
-        "mcp": format!("{base_url}/mcp"),
-        "guides": format!("{base_url}/agents"),
+        Reply::json(200, &body.to_string())
     })
-}
-
-/// Auth's public Product list, `{"apps": [...]}` in the order given.
-pub fn product_list(request: &Recorded, products: &[Value]) -> Option<Reply> {
-    (request.path() == LIST_PATH)
-        .then(|| Reply::json(200, &json!({ "apps": products }).to_string()))
-}
-
-/// Makes every file in `folder` look `age` old.
-pub fn age_files(folder: &Path, age: std::time::Duration) {
-    for entry in fs::read_dir(folder).expect("the folder") {
-        let file = fs::File::options()
-            .write(true)
-            .open(entry.expect("an entry").path())
-            .expect("open the file");
-        file.set_modified(std::time::SystemTime::now() - age)
-            .expect("age the file");
-    }
-}
-
-/// An address nothing listens on: a port that was free a moment ago.
-pub fn closed_address() -> String {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a free port");
-    let address = listener.local_addr().expect("a local address");
-    format!("http://{address}")
 }
 
 /// Auth's discovery document, with its endpoints under `/connect/`.
@@ -470,10 +346,10 @@ pub fn credentials_path(config: &Path) -> std::path::PathBuf {
     config.join("credentials.json")
 }
 
-/// Stores a sign-in for the Auth address `auth` as `mvdm login` leaves it.
+/// Stores a sign-in for `host` as `compliance login` leaves it.
 pub fn store_sign_in(
     config: &Path,
-    auth: &str,
+    host: &str,
     access_token: &str,
     expires_at: u64,
     refresh_token: &str,
@@ -483,7 +359,7 @@ pub fn store_sign_in(
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .unwrap_or_else(|| json!({ "hosts": {} }));
-    file["hosts"][auth] = json!({
+    file["hosts"][host] = json!({
         "accessToken": access_token,
         "expiresAt": expires_at,
         "refreshToken": refresh_token,

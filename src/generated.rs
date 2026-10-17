@@ -75,57 +75,36 @@ pub fn upload_slot(operation: &Operation) -> Option<UploadSlot<'_>> {
     })
 }
 
-/// What the first token of a command line asks for.
-#[derive(Debug, PartialEq)]
-pub enum Target<'a> {
-    /// No command, `--version`, or a top-level hand-written command: no Product is needed.
-    TopLevel,
-    /// The top-level help, which lists the Products.
-    Help,
-    /// The group of the Product with this name.
-    Product(&'a str),
-}
-
-/// Which Product, if any, the command line names. A top-level hand-written command hides a Product of the same
-/// name.
-pub fn target<'a>(top_level: &Command, args: &'a [OsString]) -> Target<'a> {
+/// Whether the command line can be parsed by the hand-written commands alone: no command, `--version`, or a
+/// hand-written command. A group the hand-written commands share with generated ones, such as `accounts`,
+/// needs the description unless a hand-written action follows it.
+pub fn needs_description(handwritten: &Command, args: &[OsString]) -> bool {
     let Some(first) = token(args, 1) else {
-        return Target::TopLevel;
-    };
-    if is_help_token(first) {
-        Target::Help
-    } else if first.starts_with('-') || top_level.find_subcommand(first).is_some() {
-        Target::TopLevel
-    } else {
-        Target::Product(first)
-    }
-}
-
-fn is_help_token(token: &str) -> bool {
-    matches!(token, "help" | "--help" | "-h")
-}
-
-/// Whether the arguments after a Product's name need the description. `handwritten` holds the commands of the
-/// group that need none (`api`): with no command, an option, or one of them, the arguments parse without it. Help,
-/// `chat` (which exists only when the description holds its operations), and every generated group need it.
-pub fn needs_description(handwritten: &Command, rest: &[OsString]) -> bool {
-    let Some(first) = token(rest, 0) else {
         return false;
     };
-    if is_help_token(first) {
+    if first == "help" || first == "--help" || first == "-h" {
         return true;
     }
-    !first.starts_with('-') && handwritten.find_subcommand(first).is_none()
+    if first.starts_with('-') {
+        return false;
+    }
+    match handwritten.find_subcommand(first) {
+        None => true,
+        Some(command) if !command.has_subcommands() => false,
+        Some(command) => {
+            !token(args, 2).is_some_and(|second| command.find_subcommand(second).is_some())
+        }
+    }
 }
 
-/// Whether the arguments after a Product's name name a group or action that neither the hand-written commands
-/// in the Product's group nor `operations` know.
+/// Whether the command line names a group or action that neither the hand-written commands nor `operations`
+/// know.
 pub fn names_unknown_command(
     handwritten: &Command,
     operations: &[Operation],
-    rest: &[OsString],
+    args: &[OsString],
 ) -> bool {
-    let Some(first) = token(rest, 0).filter(|first| is_name(first)) else {
+    let Some(first) = token(args, 1).filter(|first| is_name(first)) else {
         return false;
     };
     let command = handwritten.find_subcommand(first);
@@ -139,7 +118,7 @@ pub fn names_unknown_command(
     if command.is_none() && actions.peek().is_none() {
         return true;
     }
-    let Some(second) = token(rest, 1).filter(|second| is_name(second)) else {
+    let Some(second) = token(args, 2).filter(|second| is_name(second)) else {
         return false;
     };
     let handwritten_action =
@@ -157,13 +136,8 @@ fn is_name(token: &str) -> bool {
 
 /// The hand-written commands with every generated group and action added, and the operations reachable
 /// through them. A hand-written command wins over a generated one of the same name: a hand-written command
-/// without actions hides the whole group, and a hand-written action hides only that action. A command gets
-/// `--file` only when `uploads`, the Product's `uploads.create`, is there.
-pub fn tree<'a>(
-    handwritten: Command,
-    operations: &'a [Operation],
-    uploads: Option<&Operation>,
-) -> (Command, Vec<&'a Operation>) {
+/// without actions hides the whole group, and a hand-written action hides only that action.
+pub fn tree(handwritten: Command, operations: &[Operation]) -> (Command, Vec<&Operation>) {
     let mut groups: BTreeMap<&str, Vec<&Operation>> = BTreeMap::new();
     for operation in operations {
         groups.entry(&operation.group).or_default().push(operation);
@@ -184,10 +158,7 @@ pub fn tree<'a>(
                         .is_some_and(|command| command.find_subcommand(&operation.action).is_some())
             })
             .collect();
-        let actions: Vec<Command> = members
-            .iter()
-            .map(|operation| action(operation, uploads))
-            .collect();
+        let actions: Vec<Command> = members.iter().map(|operation| action(operation)).collect();
         reachable.extend(members.iter().copied());
         root = if existing.is_some() {
             root.mut_subcommand(group, |command| command.subcommands(actions))
@@ -231,8 +202,8 @@ fn group_command(group: &str, members: &[&Operation]) -> Command {
 
 /// One operation as a command. Names are claimed in a fixed order: the global options, then query parameters,
 /// then body fields. A name already taken gets the prefix `query-` or `field-`, then a number, and its help
-/// says so. Without `uploads`, a parameter with an upload target is an ordinary one: it has no `--file`.
-fn action(operation: &Operation, uploads: Option<&Operation>) -> Command {
+/// says so.
+fn action(operation: &Operation) -> Command {
     let summary = operation
         .summary
         .clone()
@@ -259,7 +230,7 @@ fn action(operation: &Operation, uploads: Option<&Operation>) -> Command {
         );
     }
 
-    let upload = upload_slot(operation).filter(|_| uploads.is_some());
+    let upload = upload_slot(operation);
     let mut taken: HashSet<String> = GLOBAL_OPTIONS.iter().map(|name| name.to_string()).collect();
     for parameter in &operation.query_params {
         let (long, mut notes) = claim(&mut taken, &parameter.name, "query");

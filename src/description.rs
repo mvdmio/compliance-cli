@@ -1,28 +1,24 @@
-//! A Product's OpenAPI description, cached per Product host in the user's cache folder.
+//! The API's OpenAPI description, cached per host in the user's cache folder.
 
 use serde_json::Value;
 
 use crate::cache::{self, Cached};
 use crate::failure::{ErrorCode, Failure};
 use crate::http;
-use crate::products::Product;
 
+const PATH: &str = "/openapi/v1.json";
 const CACHE_KIND: &str = "openapi";
 
 /// The cached copy when it is younger than an hour, else a fresh one. When the fetch fails, a stale copy is
 /// used; with no copy at all the failure is `network`.
-pub fn load(product: &Product) -> Result<Cached<Value>, Failure> {
-    Cached::load(
-        cache::file(CACHE_KIND, &product.base_url),
-        read_json,
-        || fetch(product),
-    )
+pub fn load(host: &str) -> Result<Cached<Value>, Failure> {
+    Cached::load(cache::file(CACHE_KIND, host), read_json, || fetch(host))
 }
 
 /// GETs the description without a credential, and caches it.
-pub fn fetch(product: &Product) -> Result<Value, Failure> {
-    let url = &product.open_api;
-    let (status, bytes) = http::read_answer(url, http::agent().get(url).call())?;
+pub fn fetch(host: &str) -> Result<Value, Failure> {
+    let url = format!("{host}{PATH}");
+    let (status, bytes) = http::read_answer(&url, http::agent().get(&url).call())?;
     let unusable = |why: String| {
         Failure::local(
             ErrorCode::Network,
@@ -37,7 +33,7 @@ pub fn fetch(product: &Product) -> Result<Value, Failure> {
     }
     let document = read_json(&bytes)
         .ok_or_else(|| unusable("it is not an OpenAPI description.".to_string()))?;
-    if let Some(path) = cache::file(CACHE_KIND, &product.base_url) {
+    if let Some(path) = cache::file(CACHE_KIND, host) {
         // Ignored: without a cache the next run fetches again.
         let _ = cache::save(&path, &bytes);
     }

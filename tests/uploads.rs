@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 use support::{
-    DESCRIPTION_PATH, FakeServer, Recorded, Reply, Run, TOKEN, UPLOAD_LINKS_PATH, body_json,
-    description_with_chat_and_uploads_moved, fixture, mvdm_with_token, without_operations,
+    DESCRIPTION_PATH, FakeServer, Recorded, Reply, Run, TOKEN, body_json, compliance_with_token,
+    fixture,
 };
 use tempfile::TempDir;
 
@@ -50,16 +50,10 @@ struct Host {
 
 impl Host {
     fn start() -> Self {
-        Host::serving(fixture(), "/api/v1/uploads")
+        Host::serving(fixture())
     }
 
-    /// The description places `uploads.create` at `UPLOAD_LINKS_PATH`, and the host serves it only there.
-    fn moved() -> Self {
-        Host::serving(description_with_chat_and_uploads_moved(), UPLOAD_LINKS_PATH)
-    }
-
-    /// Serves `description`, whose `uploads.create` is at `uploads_path`.
-    fn serving(description: Value, uploads_path: &'static str) -> Self {
+    fn serving(description: Value) -> Self {
         let links = Arc::new(Mutex::new(Links::default()));
         let state = Arc::clone(&links);
         let server = FakeServer::start(move |request| {
@@ -67,7 +61,7 @@ impl Host {
                 return Reply::json(200, &description.to_string());
             }
             let mut links = state.lock().unwrap();
-            if request.path() == uploads_path {
+            if request.path() == "/api/v1/uploads" {
                 return links.create(request);
             }
             if let Some(rest) = request.path().strip_prefix("/uploads/") {
@@ -101,7 +95,7 @@ impl Host {
     }
 
     fn run(&self, args: &[&str]) -> Run {
-        mvdm_with_token(&self.server, &[&["compliance"], args].concat())
+        compliance_with_token(&self.server, args)
     }
 
     fn requests(&self) -> Vec<Recorded> {
@@ -567,7 +561,7 @@ fn an_upload_target_query_parameter_takes_a_file_too() {
             "responses": { "201": { "description": "Created", "content": { "application/json": {} } } }
         }
     });
-    let host = Host::serving(document, "/api/v1/uploads");
+    let host = Host::serving(document);
     let file = host.file("space.zip", b"PK");
 
     let run = host.run(&["imports", "create", "--file", &file]);
@@ -578,62 +572,6 @@ fn an_upload_target_query_parameter_takes_a_file_too() {
     assert_eq!(
         requests.last().unwrap().url,
         "/api/v1/import-sessions?uploadId=00000000-0000-0000-0000-000000000001"
-    );
-}
-
-#[test]
-fn the_upload_link_is_requested_where_the_description_places_uploads_create() {
-    let host = Host::moved();
-    let file = host.file("big.zip", BIG);
-
-    let run = host.run(&["evidence", "create", "--file", &file, "--title", "T"]);
-
-    assert_eq!(run.code, 0, "{run:#?}");
-    let requests = host.requests();
-    assert_eq!(requests[0].method, "POST");
-    assert_eq!(requests[0].path(), UPLOAD_LINKS_PATH);
-    assert_eq!(
-        body_json(&requests[0]),
-        json!({ "target": "evidence", "fileName": "big.zip" })
-    );
-    assert!(
-        requests
-            .iter()
-            .all(|request| request.path() != "/api/v1/uploads")
-    );
-    assert_eq!(host.received("t1"), BIG);
-    assert!(host.finished("t1"));
-    assert_eq!(
-        body_json(requests.last().unwrap()),
-        json!({ "uploadId": "00000000-0000-0000-0000-000000000001", "title": "T" })
-    );
-}
-
-#[test]
-fn a_product_without_uploads_create_gives_no_command_a_file_option() {
-    let document = without_operations(fixture(), &["uploads.create"]);
-    let host = Host::serving(document, "/api/v1/uploads");
-    let file = host.file("small.pdf", b"%PDF");
-
-    let help = host.run(&["evidence", "create", "--help"]);
-    let with_file = host.run(&["evidence", "create", "--file", &file]);
-    let by_hand = host.run(&["evidence", "create", "--upload-id", "u1", "--title", "T"]);
-
-    assert_eq!(help.code, 0, "{help:#?}");
-    assert!(!help.stdout.contains("--file"), "{}", help.stdout);
-    assert!(help.stdout.contains("--upload-id"), "{}", help.stdout);
-    assert_eq!(with_file.code, 2, "{with_file:#?}");
-    assert_eq!(with_file.stderr_json()["error"], "usage");
-    // The rest of the command works: the upload id typed by hand is sent as it is.
-    assert_eq!(by_hand.code, 0, "{by_hand:#?}");
-    assert_eq!(
-        lines(&host.requests()),
-        ["POST /api/v1/evidence"],
-        "no upload link is requested"
-    );
-    assert_eq!(
-        body_json(&host.requests()[0]),
-        json!({ "uploadId": "u1", "title": "T" })
     );
 }
 

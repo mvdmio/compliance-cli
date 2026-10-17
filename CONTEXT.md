@@ -1,19 +1,13 @@
-# mvdm CLI
+# Compliance CLI
 
-The `mvdm` command-line tool for the REST APIs of the mvdm.io Products, and the tests that prove it works against them.
+The `compliance` command-line tool for the Compliance REST API, and the tests that prove it works against Compliance.
 
 ## Language
-
-### The CLI
-
-**Product**:
-An mvdm.io service whose REST API the CLI offers. Auth lists the Products at `/agent-access/apps`; an `MVDM_<NAME>_URL` variable can also name one, and wins over the list. Each Product's commands sit under its name: `mvdm <product> …`.
-_Avoid_: App, service, host
 
 ### Testing against Compliance
 
 **Fake host**:
-A stand-in for Auth or a Product that a test starts inside its own process and scripts request by request. It is used by every test that runs on every change.
+A stand-in for Compliance or Auth that a test starts inside its own process and scripts request by request. It is used by every test that runs on every change.
 _Avoid_: Mock server, stub
 
 **Test-bed**:
@@ -25,7 +19,7 @@ The one command that starts a Test-bed and reports its address and Personal toke
 _Avoid_: Bootstrap, setup script
 
 **E2E suite**:
-The set of Scenarios that runs the real `mvdm` binary, as `mvdm compliance …`, against a Test-bed. It runs only when someone asks for it, or on the nightly schedule, never as part of the ordinary tests.
+The set of Scenarios that runs the real `compliance` binary against a Test-bed. It runs only when someone asks for it, or on the nightly schedule, never as part of the ordinary tests.
 _Avoid_: Integration tests, system tests
 
 **Scenario**:

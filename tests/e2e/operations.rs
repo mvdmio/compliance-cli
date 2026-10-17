@@ -22,29 +22,14 @@ const METHODS: [(&str, Method); 7] = [
     ("patch", Method::PATCH),
 ];
 
-/// The Product the suite runs the CLI against: the group every command sits in.
-pub const PRODUCT: &str = "compliance";
-
-/// The hand-written commands in a Product's group that take no action (`ProductCommand` in `src/cli.rs`). A
-/// generated group of the same name is hidden behind them, as `tree` in `src/generated.rs` does.
-const HANDWRITTEN_LEAVES: [&str; 1] = ["api"];
-
-/// The actions of the hand-written group `chat` (`ChatCommand` in `src/cli.rs`). `tree` hides a generated action
-/// of the same name; the other actions of a generated `chat` group stay.
-const HANDWRITTEN_CHAT_ACTIONS: [&str; 1] = ["send"];
-
-/// The operations `chat send` calls (`chat::operations` in `src/chat.rs`). The CLI has the hand-written `chat`
-/// group only in a Product whose description holds all three.
-const CHAT_OPERATIONS: [&str; 3] = [
-    "conversations.create",
-    "conversations.send-message",
-    "conversations.list-messages",
-];
+/// The hand-written commands that take no action (`Command` in `src/cli.rs`). A generated group of the same name is
+/// hidden behind them, as `tree` in `src/generated.rs` does.
+const HANDWRITTEN_LEAVES: [&str; 5] = ["login", "logout", "status", "api", "skill"];
 
 /// The most `$ref` hops followed to reach a path item (`MAX_REF_DEPTH` in `src/openapi.rs`).
 const MAX_REF_DEPTH: usize = 16;
 
-/// A command the CLI names an operation by: `mvdm compliance <group> <action>`.
+/// A command the CLI names an operation by: `compliance <group> <action>`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CommandName {
     pub group: String,
@@ -61,33 +46,28 @@ impl CommandName {
     }
 
     /// Whether the CLI builds a generated command under this name: `tree` drops a group or action named `help`,
-    /// and every group a hand-written command without actions hides, and, when the description `holds_chat`,
-    /// `chat send`, which the hand-written `chat send` answers in place of.
-    pub fn is_generated(&self, holds_chat: bool) -> bool {
+    /// and every group a hand-written command without actions hides. `accounts list` and `accounts switch` stay:
+    /// the hand-written actions answer in their place.
+    pub fn is_generated(&self) -> bool {
         self.group != "help"
             && self.action != "help"
             && !HANDWRITTEN_LEAVES.contains(&self.group.as_str())
-            && !(holds_chat
-                && self.group == "chat"
-                && HANDWRITTEN_CHAT_ACTIONS.contains(&self.action.as_str()))
     }
 
-    /// `compliance <group> <action>`, the start of the command's arguments.
+    /// `<group> <action>`, the start of the command's arguments.
     pub fn args(&self) -> Vec<String> {
-        vec![PRODUCT.to_string(), self.group.clone(), self.action.clone()]
+        vec![self.group.clone(), self.action.clone()]
     }
 }
 
 impl std::fmt::Display for CommandName {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "mvdm {PRODUCT} {} {}", self.group, self.action)
+        write!(formatter, "compliance {} {}", self.group, self.action)
     }
 }
 
 /// One operation in the description, with the command the CLI names it by.
 pub struct LiveOperation {
-    /// The `operationId` as written.
-    pub operation_id: Option<String>,
     /// `None` when the operation has no `<group>.<action>` `operationId`, so the CLI offers no command for it.
     pub command: Option<CommandName>,
     pub method: Method,
@@ -117,7 +97,6 @@ pub fn live_operations(description: &Value) -> Vec<LiveOperation> {
                 continue;
             };
             operations.push(LiveOperation {
-                operation_id: operation["operationId"].as_str().map(str::to_string),
                 command: operation["operationId"]
                     .as_str()
                     .and_then(CommandName::from_operation_id),
@@ -128,16 +107,6 @@ pub fn live_operations(description: &Value) -> Vec<LiveOperation> {
         }
     }
     operations
-}
-
-/// Whether the description holds the operations `chat send` calls, so the CLI has the hand-written `chat` group
-/// (`chat::operations` in `src/chat.rs`).
-pub fn holds_chat(operations: &[LiveOperation]) -> bool {
-    CHAT_OPERATIONS.iter().all(|id| {
-        operations
-            .iter()
-            .any(|operation| operation.operation_id.as_deref() == Some(id))
-    })
 }
 
 /// The placeholder names in a path template, in order (`placeholders` in `src/openapi.rs`).

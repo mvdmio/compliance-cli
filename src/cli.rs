@@ -2,14 +2,12 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::products::Product;
-
-/// Command-line tool for the REST APIs of the mvdm.io Products. Every command prints JSON.
+/// Command-line tool for the Compliance REST API. Every command prints JSON.
 ///
 /// Exit codes: 0 success, 1 error, 2 usage mistake, 3 Browser handoff (a person must finish the act in the
 /// browser at `handoffUrl`).
 #[derive(Parser)]
-#[command(name = "mvdm", version)]
+#[command(name = "compliance", version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -20,47 +18,25 @@ pub enum Command {
     /// Sign in through Auth in the browser, or with a device code, and store the sign-in.
     Login(LoginArgs),
 
-    /// End the stored sign-in at Auth and forget it. MVDM_TOKEN is not touched.
+    /// End the stored sign-in at Auth and forget it. COMPLIANCE_TOKEN is not touched.
     Logout,
 
-    /// Show the Auth address, the credential in use, the User, and the Account commands act in.
+    /// Show the host, the credential in use, the User, and the Account commands act in.
     Status,
 
     /// List the User's Accounts, or move the credential to another one.
     #[command(subcommand)]
     Accounts(AccountsCommand),
 
-    /// Print the Agent skill file: when and how to use this CLI, as Markdown.
-    Skill,
-}
-
-/// The hand-written commands inside every Product's group, beside the ones generated from its OpenAPI description.
-#[derive(Subcommand)]
-pub enum ProductCommand {
-    /// Make one raw call to the Product's REST API with the current credential.
-    Api(ApiArgs),
-}
-
-// The hand-written command in the group of a Product whose OpenAPI description holds the conversation operations.
-// Not a doc comment: the derive would set it as the group's `about`, which is the Product's display name.
-#[derive(Subcommand)]
-pub enum ChatGroup {
-    /// Talk to the Product's Assistant.
+    /// Talk to our Assistant.
     #[command(subcommand)]
     Chat(ChatCommand),
-}
 
-/// The group `mvdm <name> …`, with the hand-written commands in it that need no description.
-pub fn product_command(product: &Product) -> clap::Command {
-    // The derive sets an `about` of its own from the enum's doc comment, so the display name comes after it.
-    ProductCommand::augment_subcommands(clap::Command::new(product.name.clone()))
-        .about(product.display_name.clone())
-        .subcommand_required(true)
-}
+    /// Make one raw call to the REST API with the current credential.
+    Api(ApiArgs),
 
-/// `group` with `chat` added.
-pub fn with_chat(group: clap::Command) -> clap::Command {
-    ChatGroup::augment_subcommands(group)
+    /// Print the Agent skill file: when and how to use this CLI, as Markdown.
+    Skill,
 }
 
 #[derive(Args)]
@@ -77,7 +53,7 @@ pub enum AccountsCommand {
 
     /// Move the credential into another Account, for every later command.
     Switch {
-        /// The Account id, from `mvdm accounts list`.
+        /// The Account id, from `compliance accounts list`.
         id: u64,
     },
 }
@@ -107,7 +83,7 @@ pub struct ApiArgs {
     /// HTTP method, such as GET, POST, PUT, PATCH, or DELETE.
     pub method: String,
 
-    /// Path relative to the Product's host, such as /api/v1/risks. A query string rides in the path.
+    /// Path relative to the host, such as /api/v1/risks. A query string rides in the path.
     pub path: String,
 
     /// JSON request body, given inline or read from a file with @path.

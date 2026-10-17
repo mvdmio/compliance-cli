@@ -10,8 +10,7 @@ use crate::failure::Failure;
 use crate::generated::{self, BODY, FILE, Location, OUT, UploadSlot};
 use crate::http::Client;
 use crate::openapi::{Operation, Parameter};
-use crate::products::Product;
-use crate::request::{self, UNRESERVED, fill_placeholder};
+use crate::request::{self, UNRESERVED, path_segment};
 use crate::response;
 use crate::upload;
 
@@ -28,15 +27,9 @@ const QUERY: &AsciiSet = &UNRESERVED
     .remove(b'!')
     .remove(b'*');
 
-/// Uploads each `--file` through an Upload link first; the call then carries the upload ids. `uploads` is the
-/// Product's `uploads.create`, which requests the links; only a command built with it has `--file`.
-pub fn run(
-    product: &Product,
-    uploads: Option<&Operation>,
-    operation: &Operation,
-    matches: &ArgMatches,
-) -> Result<(), Failure> {
-    // Only an operation with an upload target, in a Product that holds `uploads.create`, has `--file`.
+/// Uploads each `--file` through an Upload link first; the call then carries the upload ids.
+pub fn run(operation: &Operation, matches: &ArgMatches) -> Result<(), Failure> {
+    // Only an operation with an upload target has `--file`.
     let files: Vec<&PathBuf> = matches
         .try_get_many::<PathBuf>(FILE)
         .ok()
@@ -44,20 +37,18 @@ pub fn run(
         .into_iter()
         .flatten()
         .collect();
-    let upload = uploads
-        .filter(|_| !files.is_empty())
-        .and_then(|create| generated::upload_slot(operation).map(|slot| (create, slot)));
+    let upload = generated::upload_slot(operation).filter(|_| !files.is_empty());
     let upload_field = upload
         .as_ref()
-        .filter(|(_, slot)| slot.location == Location::Body)
-        .map(|(_, slot)| slot.parameter);
+        .filter(|slot| slot.location == Location::Body)
+        .map(|slot| slot.parameter);
     let mut body = body(operation, matches, upload_field)?;
     // Only a download has `--out`.
     let out = matches.try_get_one::<PathBuf>(OUT).ok().flatten();
 
-    let mut client = Client::signed_in(product)?;
+    let mut client = Client::signed_in()?;
     let uploaded = match &upload {
-        Some((create, slot)) => Some((slot, upload::send_all(&mut client, create, slot, &files)?)),
+        Some(slot) => Some((slot, upload::send_all(&mut client, slot, &files)?)),
         None => None,
     };
     if let (Some(field), Some((_, ids)), Some(Value::Object(fields))) =
@@ -81,7 +72,8 @@ fn target(
     let mut path = operation.path.clone();
     for parameter in &operation.path_params {
         if let Some(value) = matches.get_one::<Value>(&generated::path_id(parameter)) {
-            path = fill_placeholder(&path, &parameter.name, &text(value));
+            let segment = path_segment(&text(value));
+            path = path.replace(&format!("{{{}}}", parameter.name), &segment);
         }
     }
     let mut query = Vec::new();

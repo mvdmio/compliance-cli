@@ -11,7 +11,7 @@ use crate::http;
 use crate::store::{self, SignIn, User};
 
 /// The CLI's pre-registered public client at Auth.
-pub const CLIENT_ID: &str = "mvdmio.cli";
+pub const CLIENT_ID: &str = "mvdmio.compliance_cli";
 
 /// Asked for on authorize and device requests, so the token response carries an `id_token` with the User.
 pub const SCOPE: &str = "openid";
@@ -100,7 +100,7 @@ pub fn request_tokens(
 }
 
 /// Revokes a token (RFC 7009). Auth answers 200 for a token it no longer knows, too.
-pub fn revoke(agent: &Agent, endpoint: &str, sign_in: &SignIn) -> Result<(), Failure> {
+pub fn revoke(agent: &Agent, server: &AuthServer, sign_in: &SignIn) -> Result<(), Failure> {
     let (token, hint) = match &sign_in.refresh_token {
         Some(refresh_token) => (refresh_token.as_str(), "refresh_token"),
         None => (sign_in.access_token.as_str(), "access_token"),
@@ -110,7 +110,7 @@ pub fn revoke(agent: &Agent, endpoint: &str, sign_in: &SignIn) -> Result<(), Fai
         ("token", token),
         ("token_type_hint", hint),
     ];
-    post_form(agent, endpoint, &form)?.map_err(OAuthError::into_failure)?;
+    post_form(agent, &server.revocation_endpoint, &form)?.map_err(OAuthError::into_failure)?;
     Ok(())
 }
 

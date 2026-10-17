@@ -1,16 +1,11 @@
 use std::env;
 
-const DEFAULT_AUTH: &str = "https://auth.mvdm.io";
+const DEFAULT_HOST: &str = "https://compliance.mvdm.io";
 
-/// Auth's address: `MVDM_AUTH_URL` when set, without a trailing slash.
-pub fn auth() -> String {
-    match env::var("MVDM_AUTH_URL") {
-        Ok(url) if !url.trim().is_empty() => trim_address(&url),
-        _ => DEFAULT_AUTH.to_string(),
+/// The Compliance host: `COMPLIANCE_URL` when set, without a trailing slash.
+pub fn host() -> String {
+    match env::var("COMPLIANCE_URL") {
+        Ok(url) if !url.trim().is_empty() => url.trim().trim_end_matches('/').to_string(),
+        _ => DEFAULT_HOST.to_string(),
     }
-}
-
-/// An address as typed, without surrounding spaces or a trailing slash.
-pub fn trim_address(url: &str) -> String {
-    url.trim().trim_end_matches('/').to_string()
 }
