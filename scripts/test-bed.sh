@@ -221,7 +221,7 @@ ON CONFLICT (account_id) DO NOTHING;
 INSERT INTO auth.personal_tokens (user_id, name, secret_hash, account_id, expires_at)
 VALUES (1, 'Test-bed', sha256(convert_to(:'token', 'UTF8')), 1, NULL);
 
-INSERT INTO compliance.assistant_allowances (account_id, included_period_key, extra_usd)
+INSERT INTO auth.assistant_allowances (account_id, included_period_key, extra_usd)
 VALUES (1, 'comp:' || to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 100)
 ON CONFLICT (account_id) DO UPDATE SET extra_usd = EXCLUDED.extra_usd;
 SQL
