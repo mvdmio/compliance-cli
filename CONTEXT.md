@@ -27,5 +27,9 @@ One named case in the E2E suite: the CLI commands it runs against a Test-bed and
 _Avoid_: Test case, flow
 
 **Sweep**:
-A Scenario that runs the same check over every generated command the live API description yields, rather than one hand-picked command. The **Help sweep** asks each command for its help, and the **Read sweep** runs each read operation.
+A Scenario that runs the same check over every generated command the live API description yields, rather than one hand-picked command. The **Help sweep** asks each command for its help, the **Read sweep** runs each read operation, and the **Write sweep** runs each write operation (POST, PUT, PATCH, or DELETE) and then checks what it changed.
 _Avoid_: Crawl, fuzz
+
+**Sweep record**:
+A record the Write sweep creates on the Test-bed for its own writes to act on, so that it never updates or deletes a seeded record that other Scenarios read.
+_Avoid_: Fixture, test data
