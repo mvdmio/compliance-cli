@@ -11,10 +11,8 @@ use crate::failure::{ErrorCode, Failure};
 const USER_AGENT: &str = concat!("compliance-cli/", env!("CARGO_PKG_VERSION"));
 const MAX_RATE_LIMIT_RETRIES: usize = 3;
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(1);
-/// A stored access token this close to its expiry is refreshed before the call.
 const REFRESH_MARGIN_SECONDS: u64 = 60;
 
-/// The one HTTP agent every request uses: the CLI's User-Agent, and every status returned as a response.
 pub fn agent() -> Agent {
     Agent::config_builder()
         .http_status_as_error(false)
@@ -23,7 +21,6 @@ pub fn agent() -> Agent {
         .new_agent()
 }
 
-/// A request that never got an answer: `config` for an address that does not parse, else `network`.
 pub fn transport_failure(url: &str, error: ureq::Error) -> Failure {
     match error {
         ureq::Error::BadUri(_) | ureq::Error::Http(_) => Failure::local(
@@ -34,8 +31,6 @@ pub fn transport_failure(url: &str, error: ureq::Error) -> Failure {
     }
 }
 
-/// The status and whole body of the answer `result` holds for `url`. No answer, or a body that broke off, is
-/// `transport_failure`.
 pub fn read_answer(
     url: &str,
     result: Result<Response<ureq::Body>, ureq::Error>,
@@ -50,8 +45,6 @@ pub fn read_answer(
     Ok((response.status(), bytes))
 }
 
-/// Calls one Compliance host with one credential. A stored sign-in is refreshed when its access token is about to
-/// expire, and once more on a 401.
 pub struct Client {
     agent: Agent,
     host: String,
@@ -67,7 +60,6 @@ impl Client {
         }
     }
 
-    /// A client for the configured host with the credential in use; `not-signed-in` without one.
     pub fn signed_in() -> Result<Self, Failure> {
         let host = config::host();
         let credential = credential::require(&host)?;
@@ -112,9 +104,6 @@ impl Client {
         Ok(())
     }
 
-    /// Sends `method` to `path` (relative to the host, query string included) with an optional JSON body. A 429
-    /// waits for `Retry-After` and retries, up to `MAX_RATE_LIMIT_RETRIES`; the last answer is returned whatever
-    /// its status.
     fn send_rate_limited(
         &self,
         method: &Method,
@@ -158,7 +147,6 @@ impl Client {
     }
 }
 
-/// `Retry-After` as seconds or an HTTP date (RFC 9110 §10.2.3).
 fn retry_after(headers: &HeaderMap) -> Duration {
     let Some(value) = headers
         .get(header::RETRY_AFTER)

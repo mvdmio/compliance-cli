@@ -24,6 +24,7 @@ serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve
 ureq = "3.4.2"
 
 [dev-dependencies]
+ra-ap-rustc_lexer = "0.185.0"
 tempfile = "3.27.0"
 tiny_http = "0.12.0"
 

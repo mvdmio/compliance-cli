@@ -6,7 +6,6 @@ use serde_json::json;
 
 use crate::output;
 
-/// The `error` field of a local failure on stderr. Agents match on it, so a name never changes.
 #[derive(Clone, Copy, Debug)]
 pub enum ErrorCode {
     AccessDenied,
@@ -48,16 +47,14 @@ impl ErrorCode {
     }
 }
 
-/// Every way a command ends other than success, and the exit code each maps to.
 #[derive(Debug)]
 pub enum Failure {
-    /// A mistake in the command line: exit 2.
     Usage(String),
-    /// A failure before or outside the API, as `{"error":<code>,"message":…}` on stderr: exit 1.
-    Local { code: ErrorCode, message: String },
-    /// The API's ProblemDetails body as it came: exit 1.
+    Local {
+        code: ErrorCode,
+        message: String,
+    },
     Problem(Vec<u8>),
-    /// The API's 403 `browser-handoff`: a person must finish the act at `handoff_url`. Exit 3.
     BrowserHandoff {
         reason: Option<String>,
         handoff_url: Option<String>,
@@ -72,12 +69,10 @@ impl Failure {
         }
     }
 
-    /// The local error `invalid-response`, for a success body without the shape the CLI reads.
     pub fn invalid_response(message: impl Into<String>) -> Self {
         Failure::local(ErrorCode::InvalidResponse, message)
     }
 
-    /// The local error `file`, for a file the CLI could not read or write.
     pub fn file(path: &Path, error: io::Error) -> Self {
         Failure::local(ErrorCode::File, format!("{}: {error}", path.display()))
     }

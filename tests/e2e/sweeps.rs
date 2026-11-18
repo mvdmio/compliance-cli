@@ -1,7 +1,3 @@
-//! The Sweeps: Scenarios that run one command per operation in the Test-bed's live API description. Each runs
-//! every command before it fails, then fails once, listing every command that did not pass. The Write sweep's
-//! engine is in `write_sweep.rs`.
-
 use std::fs;
 use std::path::PathBuf;
 
@@ -18,7 +14,6 @@ fn help_sweep() {
     let scenario = Scenario::start("help sweep");
     let operations = live_operations(&scenario.test_bed().description());
 
-    // Every generated command, once: two operations with one name are one command, and the CLI keeps the first.
     let mut commands: Vec<&CommandName> = Vec::new();
     for command in operations
         .iter()
@@ -53,28 +48,22 @@ fn help_sweep() {
     );
 }
 
-/// One read in the report: what it is, and how it went.
 struct Checked {
     label: String,
     verdict: Verdict,
 }
 
-/// The command line for one read, and the file it downloads to when its answer is a file.
 struct ReadCommand {
     args: Vec<String>,
     out: Option<PathBuf>,
 }
 
-/// The Read sweep's state.
 struct ReadSweep<'a> {
     lookup: Lookup<'a>,
-    /// Where the downloads write their files.
     out: tempfile::TempDir,
 }
 
 impl ReadSweep<'_> {
-    /// Runs the read at `operations[index]` through its command. `accounts.list` needs no special case: its name
-    /// is the hand-written `accounts list`, which answers in place of the generated one.
     fn check(&mut self, index: usize) -> Checked {
         let operation = &self.lookup.operations[index];
         let label = match &operation.command {
@@ -88,9 +77,6 @@ impl ReadSweep<'_> {
         Checked { label, verdict }
     }
 
-    /// The command line for the read at `operations[index]`, or why it cannot run: the CLI dropped the operation
-    /// (no name, a name an earlier operation holds, or a name `--help` does not list), or a list it takes a value
-    /// from is empty or failed.
     fn read_command(&mut self, index: usize) -> Result<ReadCommand, Verdict> {
         let operations = self.lookup.operations;
         let operation = &operations[index];
@@ -129,7 +115,6 @@ impl ReadSweep<'_> {
         Ok(ReadCommand { args, out })
     }
 
-    /// Runs one read. It passes on exit 0 and JSON on stdout, or, for a download, a non-empty file at `--out`.
     fn judge(&mut self, read: ReadCommand) -> Verdict {
         let shown = format!("compliance {}", read.args.join(" "));
         let run = self.lookup.run(read.args);
@@ -152,7 +137,6 @@ impl ReadSweep<'_> {
         Verdict::Failed(format!("`{shown}` {problem}"))
     }
 
-    /// Whether `compliance <group> --help` lists the action under `Commands:`.
     fn help_lists(&mut self, command: &CommandName) -> bool {
         let run = self
             .lookup

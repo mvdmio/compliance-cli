@@ -2,8 +2,6 @@ use std::io::{self, IsTerminal, Write};
 
 use serde_json::Value;
 
-// Write errors are ignored throughout: a closed stdout or stderr leaves nowhere to report them.
-
 pub fn print_json(value: &Value) {
     let stdout = io::stdout();
     let pretty = stdout.is_terminal();

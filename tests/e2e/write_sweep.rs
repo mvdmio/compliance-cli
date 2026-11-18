@@ -1,10 +1,3 @@
-//! The Write sweep's engine: it runs every write operation in the live API description through its generated
-//! command, in groups, and checks what each write stored by reading it back through a read command.
-//!
-//! A group is the resource a path acts on (`risks` for `/api/v1/risks/{id}/comments`). Its writes run in a fixed
-//! order, the create first and the delete last. Everything a write acts on is a Sweep record this run created, so
-//! the run leaves the Test-bed as it found it. What the description cannot say goes in `write_table`.
-
 use std::fmt::Display;
 
 use serde_json::{Number, Value};
@@ -15,50 +8,38 @@ use crate::support::Run;
 use crate::test_bed::Scenario;
 use crate::write_table::{self, Override};
 
-/// The kinds of write in the order a group runs them.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Stage {
-    /// A POST to the group's own path.
     Create,
-    /// A POST to a path under a record, which has a read of its own, or one that makes a record of another group.
     Add,
     Update,
-    /// Any other POST.
     Action,
     SubUpdate,
     SubDelete,
     Delete,
 }
 
-/// One write operation, placed in its group and stage.
 struct Write<'a> {
     operation: &'a LiveOperation,
     command: &'a CommandName,
     group: &'a str,
     stage: Stage,
-    /// An earlier operation the CLI runs under this command's name, so this one has no command of its own.
     shadowed_by: Option<&'a LiveOperation>,
 }
 
-/// How a write counts in the summary.
 enum Counted {
-    /// Ran, and passed every check.
     Run,
-    /// Gave the outcome its table entry names.
     Expected,
     Skipped(String),
     Failed(String),
 }
 
-/// A record this run created. Its id fills the placeholders and id fields of later writes.
 struct Record {
-    /// The path the create or add posted to, such as `/api/v1/risks` or `/api/v1/risks/{id}/comments`.
     collection: String,
     id: String,
     deleted: bool,
 }
 
-/// A command the binary ran, and what came back.
 struct Ran {
     args: Vec<String>,
     run: Run,
@@ -76,52 +57,34 @@ impl Ran {
     }
 }
 
-/// How to read a write's record back.
 struct ReadBack {
     args: Vec<String>,
-    /// The read answers a list, and the record is its item with this id.
     item: Option<String>,
-    /// The read is of a record above the one written, which the write must change.
     changes: bool,
 }
 
-/// What an entry's `from_read` found.
 enum Picked {
     Values(Vec<(&'static str, String)>),
-    /// No item qualified, and the entry says that is no failure: why.
     Missing(&'static str),
 }
 
-/// The writes in `operations`, run once each, and what is left to report.
 struct Sweep<'a> {
     scenario: &'a Scenario,
     operations: &'a [LiveOperation],
-    /// Every write, so a write that needs a record of another group can run that group's create.
     writes: &'a [Write<'a>],
     records: Vec<Record>,
-    /// The collections of Sweep records the run could not make, with why: every write that needs one is skipped.
     no_record: Vec<(&'static str, &'static str)>,
-    /// The ids of the Tasks the Account had when the run began. A write can make Tasks of its own (a review of a
-    /// new Asset, an acknowledgement of a new Policy), and while one is left, the record it is about cannot go.
     tasks_before: Vec<String>,
-    /// Small files in a temporary folder, which a write with an upload target sends with `--file`. The folder goes
-    /// when the sweep does.
     upload: Upload,
-    /// The time the run began, in milliseconds, so a value that must be unique (`{n}`) is not one an earlier run left
-    /// on a Test-bed this run shares with it.
     started: u128,
 }
 
 struct Upload {
-    /// For every target but `import`.
     text: String,
-    /// For `import`, which takes only a `.zip`. It is not an export, so Compliance's prepare of it fails at once.
     zip: String,
     _folder: tempfile::TempDir,
 }
 
-/// Runs every write operation in `operations` and prints the report. Panics when a write failed, a skipped write
-/// has no reason, or the counts do not add up to the write operations in `operations`.
 pub fn run(scenario: &Scenario, operations: &[LiveOperation]) {
     let writes = writes(operations);
     let expected = operations
@@ -199,8 +162,12 @@ pub fn run(scenario: &Scenario, operations: &[LiveOperation]) {
         match counted {
             Counted::Skipped(reason) => println!("skipped: {id}: {reason}"),
             Counted::Failed(why) => {
-                println!("failed: {id}: {why}");
-                failures.push(format!("{id}: {why}"));
+                let failure = match write_table::entry(id).reason {
+                    Some(reason) => format!("{id}: {why} Table entry: {reason}"),
+                    None => format!("{id}: {why}"),
+                };
+                println!("failed: {failure}");
+                failures.push(failure);
             }
             Counted::Run | Counted::Expected => {}
         }
@@ -230,8 +197,6 @@ pub fn run(scenario: &Scenario, operations: &[LiveOperation]) {
     );
 }
 
-/// Every write the CLI generates a command for, grouped by the resource it acts on and ordered as a group runs
-/// them: by stage, then by path.
 fn writes(operations: &[LiveOperation]) -> Vec<Write<'_>> {
     let mut writes: Vec<Write> = Vec::new();
     for (index, operation) in operations.iter().enumerate() {
@@ -245,8 +210,6 @@ fn writes(operations: &[LiveOperation]) -> Vec<Write<'_>> {
         let has_read = operations
             .iter()
             .any(|other| other.is_read() && other.path == operation.path);
-        // A POST that makes a record of another group's collection adds it, and is read back through that group.
-        // One that makes a record of its own group's collection, such as `frameworks.adopt`, is the group's create.
         let made = write_table::entry(&operation.id)
             .made
             .as_ref()
@@ -274,7 +237,6 @@ fn writes(operations: &[LiveOperation]) -> Vec<Write<'_>> {
                 .find(|earlier| earlier.command.as_ref() == Some(command)),
         });
     }
-    // Groups in the order the description first names them; the sort is stable.
     let mut order: Vec<&str> = Vec::new();
     for write in &writes {
         if !order.contains(&write.group) {
@@ -294,8 +256,6 @@ fn writes(operations: &[LiveOperation]) -> Vec<Write<'_>> {
     writes
 }
 
-/// The group a path acts on, and the segments after it: `/api/v1/risks/{id}/comments` is `risks` and
-/// `["{id}", "comments"]`.
 fn split_group(path: &str) -> (&str, Vec<&str>) {
     let path = path.strip_prefix("/api/v1/").unwrap_or(path);
     let mut segments = path.trim_matches('/').split('/');
@@ -329,7 +289,6 @@ impl Upload {
 }
 
 impl Sweep<'_> {
-    /// Runs one write and checks it; every way it can fail is a `Counted::Failed` with the check that failed.
     fn execute(&mut self, write: &Write) -> Counted {
         let entry = write_table::entry(&write.operation.id);
         if let Some(reason) = entry.skip {
@@ -341,8 +300,6 @@ impl Sweep<'_> {
         self.check(write, entry).unwrap_or_else(Counted::Failed)
     }
 
-    /// Why the write cannot run when it needs a Sweep record the run could not make: it acts on one (its path
-    /// starts at the collection), takes the id of one (`refs`), or reads one (`from_read`).
     fn missing_record(&self, write: &Write, entry: &Override) -> Option<&'static str> {
         let under = |path: &str, collection: &str| {
             path.strip_prefix(collection)
@@ -383,7 +340,6 @@ impl Sweep<'_> {
         }
         let values = self.path_values(&write.operation.path, &refs, entry)?;
         let creates = matches!(write.stage, Stage::Create | Stage::Add);
-        // A create is read back by the id it answers with, so its read is known after the write.
         let read = (!creates).then(|| self.read_back(write, &values, None));
         if matches!(read, Some(None))
             && entry.no_read.is_none()
@@ -430,8 +386,6 @@ impl Sweep<'_> {
             args,
         };
 
-        // Writes that spend the Assistant allowance run on the Launcher's extra funds. An empty allowance is the
-        // Test-bed's, not a fault of the command.
         if status_of(&ran.run.stderr) == Some(402) {
             return Err(ran.failure(
                 "answered 402: the Test-bed's Assistant allowance for Account 1 ran out; this is not a CLI failure",
@@ -482,7 +436,6 @@ impl Sweep<'_> {
                         })
                     })
                     .and_then(|stored| compare_sent(&ran, &sent, &stored, entry.partial));
-                // The record the Account has only one of goes back as it was, whether the checks passed or not.
                 let put_back = match &before {
                     Some(before)
                         if placeholders(&write.operation.path).is_empty()
@@ -526,8 +479,6 @@ impl Sweep<'_> {
         Ok(Counted::Run)
     }
 
-    /// Registers the record a write made as a Sweep record: a create or add makes one in its own collection, and
-    /// an entry's `made` says where else a write makes one. Returns the id of the record.
     fn register(
         &mut self,
         write: &Write,
@@ -568,8 +519,6 @@ impl Sweep<'_> {
         Ok(Some(id.to_string()))
     }
 
-    /// Marks the Sweep record the write ends, the one whose id it takes under `name`, as deleted. The record is in
-    /// the collection of the group `entry.refs` names `name` for, else the write's own.
     fn end_records(
         &mut self,
         write: &Write,
@@ -595,8 +544,6 @@ impl Sweep<'_> {
         }
     }
 
-    /// The values the entry takes from reads of the Test-bed. When a read has no item that qualifies, and the entry
-    /// says why that is no failure, the write is skipped.
     fn picks(&self, entry: &Override, refs: &[(&'static str, String)]) -> Result<Picked, String> {
         let mut picked: Vec<(&'static str, String)> = Vec::new();
         for from in entry.from_read {
@@ -609,7 +556,6 @@ impl Sweep<'_> {
                 .map(CommandName::args)
                 .unwrap_or_default();
             args.extend(self.path_values(from.read, &known, entry)?);
-            // A page is as long as the read lets it be, so the item is found past a long start of the list.
             if read.query.iter().any(|parameter| parameter.option == "top") {
                 args.extend(["--top".to_string(), "200".to_string()]);
             }
@@ -651,7 +597,6 @@ impl Sweep<'_> {
         Ok(Picked::Values(picked))
     }
 
-    /// Checks the write with the read its entry names: the answer must hold every field the entry expects.
     fn expect(
         &self,
         expects: &write_table::Expects,
@@ -685,10 +630,8 @@ impl Sweep<'_> {
         Ok(())
     }
 
-    /// Marks the record a delete ended, or a write that removes its record, as deleted.
     fn mark_deleted(&mut self, write: &Write, values: &[String]) {
         let path = write.operation.path.as_str();
-        // A delete's record is the one its path ends at; any other write removes the one its path starts at.
         let ended = if matches!(write.stage, Stage::Action) {
             path.split_once("/{").zip(values.first())
         } else {
@@ -705,7 +648,6 @@ impl Sweep<'_> {
         }
     }
 
-    /// A write with nothing to read it back with passes on its exit code and JSON when its table entry says why.
     fn no_read(&self, write: &Write, entry: &Override, ran: &Ran) -> Result<Counted, String> {
         match entry.no_read {
             Some(_) => Ok(Counted::Run),
@@ -716,9 +658,6 @@ impl Sweep<'_> {
         }
     }
 
-    /// The id of the Sweep record of every group the entry points at, by the name it takes: a Sweep record is made
-    /// through the group's own create when none is left. An entry for a write on a `fresh` record also gets that
-    /// record's id as `id`, the placeholder of the record the write acts on.
     fn resolve_refs(
         &mut self,
         write: &Write,
@@ -737,10 +676,8 @@ impl Sweep<'_> {
         }
         if entry.fresh {
             let id = self.create_record(write.group)?;
-            // Kept behind the group's own record, so later writes of the group still find that one.
             let record = self.records.pop().expect("the create left a Sweep record");
             self.records.insert(0, record);
-            // A write that ends its record takes the id under the name it ends it by.
             if let Some(name) = entry.ends {
                 refs.push((name, id.clone()));
             }
@@ -749,12 +686,9 @@ impl Sweep<'_> {
         Ok(refs)
     }
 
-    /// Makes a Sweep record of `collection` (a path after `/api/v1/`, such as `people`) through its create or add,
-    /// and returns its id.
     fn create_record(&mut self, collection: &str) -> Result<String, String> {
         let writes = self.writes;
         let path = format!("/api/v1/{collection}");
-        // A create posts to the collection's path, or is a write the table says makes a record of the collection.
         let create = writes
             .iter()
             .find(|write| {
@@ -782,8 +716,6 @@ impl Sweep<'_> {
             .ok_or_else(|| format!("the create of `{collection}` left no Sweep record"))
     }
 
-    /// Writes back, through the same command, what the record held before `write` changed it, and checks that
-    /// `read` shows it again. `before` is that read taken before the write.
     fn put_back(
         &self,
         write: &Write,
@@ -837,8 +769,6 @@ impl Sweep<'_> {
             .map_err(|why| format!("after putting back the value read before the write: {why}"))
     }
 
-    /// A value for every placeholder in `path`, in order: the id the entry points it at, else the entry's fixed
-    /// value, else the id of the Sweep record the path before it names.
     fn path_values(
         &self,
         path: &str,
@@ -867,8 +797,6 @@ impl Sweep<'_> {
             .collect()
     }
 
-    /// The read command that shows what `write` stored, with the arguments that name the record. `new_id` is the
-    /// id a create or add answered with. `None` when the description has no read to check it against.
     fn read_back(
         &self,
         write: &Write,
@@ -885,7 +813,6 @@ impl Sweep<'_> {
             args.extend(values.iter().cloned());
             Some(args)
         };
-        // The nearest path above the write's that has a read: the record the write acts on, which must change.
         let record_above = || {
             let mut parent = path;
             loop {
@@ -902,7 +829,6 @@ impl Sweep<'_> {
         };
         match write.stage {
             Stage::Create | Stage::Add => {
-                // A record the path names alone, such as a Framework's statement, is read at the write's own path.
                 if write_table::entry(&write.operation.id).singleton {
                     return Some(ReadBack {
                         args: command_args(get(path)?, values)?,
@@ -911,7 +837,6 @@ impl Sweep<'_> {
                     });
                 }
                 let id = new_id?;
-                // A record of another group is read through that group's own item read, which needs no placeholder.
                 let (path, values) = match &write_table::entry(&write.operation.id).made {
                     Some(made) => (made.collection, &[][..]),
                     None => (path, values),
@@ -946,7 +871,6 @@ impl Sweep<'_> {
                         changes: false,
                     });
                 }
-                // The item has no read of its own: the list above it holds it, past any placeholders between.
                 let mut list = path;
                 while list
                     .rsplit_once('/')
@@ -969,7 +893,6 @@ impl Sweep<'_> {
         }
     }
 
-    /// Runs `read`: the record it names, or `None` when Compliance answers 404 or the list has no such item.
     fn fetch(&self, read: &ReadBack) -> Result<Option<Value>, String> {
         let run = self
             .scenario
@@ -992,9 +915,6 @@ impl Sweep<'_> {
         })
     }
 
-    /// Deletes every Sweep record that is not deleted yet and whose group has a delete, newest first, and again
-    /// while a pass deletes something: a record another one points at can go once that one is gone. Returns what
-    /// the last pass could not delete.
     fn clean_up(&mut self) -> Vec<String> {
         let mut failures = self.delete_new_tasks();
         loop {
@@ -1006,7 +926,6 @@ impl Sweep<'_> {
         }
     }
 
-    /// The ids of every Task of the Account, page by page.
     fn task_ids(&self) -> Result<Vec<String>, String> {
         let mut ids = Vec::new();
         let mut skip = 0u64;
@@ -1032,7 +951,6 @@ impl Sweep<'_> {
         }
     }
 
-    /// Deletes the Tasks that were made since the run began. Returns what went wrong.
     fn delete_new_tasks(&mut self) -> Vec<String> {
         let ids = match self.task_ids() {
             Ok(ids) => ids,
@@ -1057,7 +975,6 @@ impl Sweep<'_> {
         failures
     }
 
-    /// One pass of `clean_up`: how many records it deleted, and what went wrong for the others.
     fn delete_records(&mut self) -> (usize, Vec<String>) {
         let (mut deleted, mut failures) = (0, Vec::new());
         for index in (0..self.records.len()).rev() {
@@ -1065,7 +982,6 @@ impl Sweep<'_> {
             if record.deleted || record.collection.contains('{') {
                 continue;
             }
-            // A collection without a delete says which write ends its records.
             let ender = write_table::ended_by(&record.collection);
             let Some(command) = self
                 .operations
@@ -1107,7 +1023,6 @@ impl ReadBack {
     }
 }
 
-/// `compliance <args>` as one line, an empty argument or one with a space in quotes.
 fn command_line(args: &[String]) -> String {
     let quoted = args.iter().map(|arg| {
         if arg.is_empty() || arg.contains(' ') {
@@ -1119,20 +1034,16 @@ fn command_line(args: &[String]) -> String {
     format!("compliance {}", quoted.collect::<Vec<_>>().join(" "))
 }
 
-/// Whether `path` is the path of one item of the collection at `collection`: `/api/v1/risks/{id}` of
-/// `/api/v1/risks`.
 fn is_item_path(path: &str, collection: &str) -> bool {
     path.strip_prefix(collection)
         .and_then(|rest| rest.strip_prefix('/'))
         .is_some_and(|name| name.starts_with('{') && name.ends_with('}') && !name.contains('/'))
 }
 
-/// The `status` of an error printed as JSON on stderr.
 fn status_of(stderr: &str) -> Option<u64> {
     serde_json::from_str::<Value>(stderr).ok()?["status"].as_u64()
 }
 
-/// An expected outcome: the exit code, JSON where the command prints it, and for exit 1 the status.
 fn judge_outcome(ran: &Ran, outcome: &write_table::Outcome) -> Result<Counted, String> {
     if ran.run.code != outcome.code {
         return Err(ran.failure(format!(
@@ -1140,7 +1051,6 @@ fn judge_outcome(ran: &Ran, outcome: &write_table::Outcome) -> Result<Counted, S
             outcome.code
         )));
     }
-    // A failure is printed to stderr, anything else to stdout.
     let (printed, stream) = match outcome.code {
         1 => (&ran.run.stderr, "stderr"),
         _ => (&ran.run.stdout, "stdout"),
@@ -1156,9 +1066,6 @@ fn judge_outcome(ran: &Ran, outcome: &write_table::Outcome) -> Result<Counted, S
     Ok(Counted::Expected)
 }
 
-/// The command line for `write` and the body fields it sends, with the values the rules make from the
-/// description: the table's value for a field, else none for a field whose value no schema can make, else one
-/// value of the field's type. An update picks values that differ from the ones in `before`.
 fn build(
     write: &Write,
     values: &[String],
@@ -1170,7 +1077,6 @@ fn build(
     let operation = write.operation;
     let mut args = write.command.args();
     args.extend(values.iter().cloned());
-    // The upload id of a field with an upload target is what `--file` makes.
     if let Some(target) = operation
         .body_fields
         .iter()
@@ -1201,7 +1107,6 @@ fn build(
                 .map(|parameter| (parameter, true)),
         )
     {
-        // An optional query parameter is not a body field, and nothing reads it back.
         if !in_body && !parameter.required {
             continue;
         }
@@ -1214,7 +1119,6 @@ fn build(
                     Some(value)
                 }
             });
-        // A `<x>Kind` field only means something beside the `<x>Id` the sweep leaves out: alone, the Kind is refused.
         let kind_of_missing_id = parameter.name.strip_suffix("Kind").is_some_and(|prefix| {
             let id = format!("{prefix}Id");
             operation.body_fields.iter().any(|field| field.name == id)
@@ -1240,8 +1144,6 @@ fn build(
     (args, sent)
 }
 
-/// The value to send for `parameter` (one item of it, for an array), or `None` to leave it out. `current` is what
-/// the record holds now, so an update sends something else.
 fn value_for(
     operation_id: &str,
     parameter: &LiveParameter,
@@ -1255,10 +1157,9 @@ fn value_for(
     let fixed = entry.fixed.iter().find(|(name, _)| *name == parameter.name);
     let left_out = fixed.is_none()
         && (entry.omit.contains(&parameter.name.as_str())
-        // No value made from the schema alone points at a real record, or fills an upload.
-        || parameter.format.as_deref() == Some("uuid")
-        || parameter.upload_target.is_some()
-        || parameter.kind == Kind::Json);
+            || parameter.format.as_deref() == Some("uuid")
+            || parameter.upload_target.is_some()
+            || parameter.kind == Kind::Json);
     if left_out {
         return None;
     }
@@ -1289,7 +1190,6 @@ fn value_for(
             (Kind::Json, _) => Vec::new(),
         }
     };
-    // The next candidate after the one the record holds, so the value changes.
     let next = current
         .and_then(|current| {
             candidates
@@ -1300,7 +1200,6 @@ fn value_for(
     candidates.into_iter().nth(next)
 }
 
-/// `value` with each `{n}` in its texts replaced by `serial`.
 fn with_serial(value: Value, serial: &str) -> Value {
     match value {
         Value::String(text) => Value::String(text.replace("{n}", serial)),
@@ -1314,7 +1213,6 @@ fn with_serial(value: Value, serial: &str) -> Value {
     }
 }
 
-/// `value` as its option takes it on the command line: a text as itself, anything else as JSON.
 fn option_text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -1322,7 +1220,6 @@ fn option_text(value: &Value) -> String {
     }
 }
 
-/// `text`, as the option of a parameter of `kind` takes it.
 fn typed(kind: Kind, text: &str) -> Option<Value> {
     match kind {
         Kind::String => Some(Value::String(text.to_string())),
@@ -1332,8 +1229,6 @@ fn typed(kind: Kind, text: &str) -> Option<Value> {
     }
 }
 
-/// Every value sent that the read-back also has at its top level is the value sent. A field in `partial` is a list
-/// the write merges into the stored one, so each item sent is an item of the stored list.
 fn compare_sent(
     ran: &Ran,
     sent: &[(String, Value)],
@@ -1359,7 +1254,6 @@ fn compare_sent(
     Ok(())
 }
 
-/// Two JSON values are the same: numbers by value, dates and date-times as the same instant, arrays item by item.
 fn same(sent: &Value, found: &Value) -> bool {
     match (sent, found) {
         (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
@@ -1369,7 +1263,6 @@ fn same(sent: &Value, found: &Value) -> bool {
         (Value::Array(a), Value::Array(b)) => {
             a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same(a, b))
         }
-        // An object holds every field sent; the record may carry more.
         (Value::Object(a), Value::Object(b)) => a
             .iter()
             .all(|(name, value)| b.get(name).is_some_and(|found| same(value, found))),
@@ -1377,7 +1270,6 @@ fn same(sent: &Value, found: &Value) -> bool {
     }
 }
 
-/// The object with `id` anywhere inside `value`: an item of a page, or of a list inside a record.
 fn find_by_id<'a>(value: &'a Value, id: &str) -> Option<&'a Value> {
     match value {
         Value::Object(fields) => {
@@ -1391,8 +1283,6 @@ fn find_by_id<'a>(value: &'a Value, id: &str) -> Option<&'a Value> {
     }
 }
 
-/// A date (`2026-03-15`, midnight UTC) or a date-time (`2026-03-15T10:00:00.5+02:00`) as seconds since 1970 and
-/// nanoseconds, or `None` for any other text.
 fn instant(text: &str) -> Option<(i64, u32)> {
     let (date, time) = match text.split_once('T') {
         Some((date, time)) => (date, Some(time)),
@@ -1442,7 +1332,6 @@ fn instant(text: &str) -> Option<(i64, u32)> {
     Some((seconds, nanos))
 }
 
-/// Days from 1970-01-01 to the given date in the proleptic Gregorian calendar.
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
     let era = year.div_euclid(400);

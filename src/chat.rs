@@ -9,10 +9,8 @@ use crate::request::path_segment;
 use crate::response;
 
 const CONVERSATIONS: &str = "/api/v1/conversations";
-/// The longest the API holds a message read for a running turn.
 const WAIT_SECONDS: u32 = 60;
 
-/// `compliance chat send`.
 pub fn run(command: ChatCommand) -> Result<(), Failure> {
     match command {
         ChatCommand::Send(args) => send(args),
@@ -35,11 +33,8 @@ fn send(args: ChatSendArgs) -> Result<(), Failure> {
         &messages_path(&requested_id),
         &json!({ "text": args.text }),
     )?;
-    // Topic Split may land the message in a new conversation; that one holds the reply.
     let conversation_id = required_string(&sent, "conversationId")?;
     let mut after = seq(&sent)?;
-    // A shared conversation's running turn holds a queued message for the turn after it, which this read may end
-    // before.
     let queued = sent["queued"] == true;
 
     let read_path = messages_path(&conversation_id);

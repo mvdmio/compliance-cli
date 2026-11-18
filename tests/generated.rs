@@ -15,8 +15,6 @@ use tempfile::TempDir;
 
 const FILE_BYTES: &[u8] = b"\x00\x01binary\xff";
 
-/// A fake Compliance host that serves an API description which a test can change between runs, and one cache
-/// folder shared by every run of the test.
 struct Host {
     server: FakeServer,
     description: Arc<Mutex<Option<Value>>>,
@@ -91,7 +89,6 @@ impl Host {
         requests.into_iter().next().unwrap()
     }
 
-    /// Makes every cached copy look `age` old.
     fn age_cache(&self, age: Duration) {
         for entry in fs::read_dir(self.cache.path()).expect("the cache folder") {
             let file = File::options()
@@ -519,7 +516,6 @@ fn a_command_still_unknown_after_the_refetch_is_a_usage_mistake() {
 fn the_hand_written_accounts_list_wins_over_the_generated_one() {
     let host = Host::start();
 
-    // The generated accounts.list takes --top; the hand-written one does not.
     let hand_written = host.run(&["accounts", "list", "--top", "1"]);
     let generated = host.run(&["accounts", "get", "7"]);
     let help = host.run(&["accounts", "--help"]);
@@ -684,10 +680,6 @@ fn an_unknown_command_with_a_failed_fetch_does_not_fetch_twice() {
     assert_eq!(host.description_fetches(), 2);
 }
 
-/// The E2E suite predicts the CLI's commands with copies of its naming rules (`tests/e2e/operations.rs`). On the
-/// fixture, and on a few operations that each test one rule, every command they predict is the one the binary
-/// builds: the same names, the same hidden ones, `--out` on the same downloads, and the same option for every query
-/// parameter and body field, a clash renamed included.
 #[test]
 fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
     let mut document = fixture();
@@ -707,9 +699,7 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
             "reports.exportPDF",
             "application/pdf",
         ),
-        // A name an earlier operation holds: the CLI keeps the first, which answers JSON.
         ("/api/v1/risks/export", "risks.list", "text/csv"),
-        // Hidden: an action named `help`, a group named `help`, and a hand-written command without actions.
         ("/api/v1/risks/help", "risks.help", "application/json"),
         ("/api/v1/help", "help.list", "application/json"),
         ("/api/v1/status", "status.get", "application/json"),
@@ -722,7 +712,6 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
         });
     }
 
-    // Names that clash: with a global option (`body`, `help`), with an earlier option, and after kebab-casing.
     document["paths"]["/api/v1/clashes"] = json!({
         "post": {
             "operationId": "clashes.send",
@@ -774,7 +763,6 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
 
     let host = Host::start();
     host.serve(Some(document));
-    // Without the description, only the hand-written commands answer.
     let hand_written = Host::start();
     hand_written.serve(None);
 
@@ -807,7 +795,6 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
             .any(|line| line.trim_start().starts_with("--out "));
         assert_eq!(takes_out, *download, "{command} --help: {}", run.stdout);
 
-        // A hand-written action answers in place of the generated one, with options of its own.
         let handwritten = listed_commands(&hand_written.run(&[&command.group, "--help"]));
         if handwritten.contains(&command.action) {
             continue;
@@ -827,14 +814,11 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
     }
 }
 
-/// The options a `--help` lists under `Options:`, without the ones every command has or only some take
-/// (`--help`, `--body`, `--out`, `--file`).
 fn listed_options(run: &Run) -> Vec<String> {
     run.stdout
         .lines()
         .skip_while(|line| line.trim() != "Options:")
         .skip(1)
-        // An option starts at the margin; the lines of its help are indented further.
         .filter(|line| line.len() - line.trim_start().len() <= 6)
         .filter_map(|line| {
             let line = line.trim_start();
@@ -848,7 +832,6 @@ fn listed_options(run: &Run) -> Vec<String> {
         .collect()
 }
 
-/// The command names a `--help` lists under `Commands:`, or none when it fails or lists none.
 fn listed_commands(run: &Run) -> Vec<String> {
     if run.code != 0 {
         return Vec::new();

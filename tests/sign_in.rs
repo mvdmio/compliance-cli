@@ -11,7 +11,6 @@ use tempfile::TempDir;
 
 const CLIENT_ID: &str = "mvdmio.compliance_cli";
 
-/// A fake Compliance host whose Protected Resource Metadata names a separate fake Auth, and a config folder.
 struct Hosts {
     auth: FakeServer,
     compliance: FakeServer,
@@ -117,7 +116,6 @@ fn device_authorization(interval: u64) -> Reply {
     Reply::json(200, &body.to_string())
 }
 
-/// Auth for the device flow: the first poll is `authorization_pending`, the second answers `answer`.
 fn device_auth(answer: fn() -> Reply) -> impl Fn(&Recorded) -> Reply + Send + Sync + 'static {
     let polls = AtomicUsize::new(0);
     move |request| match request.path() {
@@ -226,7 +224,6 @@ fn auth_is_found_only_through_the_protected_resource_metadata() {
     );
 }
 
-/// Windows and macOS always have a browser to open.
 #[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn login_without_a_display_falls_back_to_the_device_code() {
@@ -312,7 +309,6 @@ fn the_stored_sign_in_is_readable_only_by_its_owner_after_login_and_after_a_refr
     assert_eq!(mode(), 0o600);
 }
 
-/// Auth that answers every refresh with `access-2` and `refresh-2`.
 fn rotating_auth(request: &Recorded) -> Reply {
     match request.path() {
         "/connect/token" => tokens("access-2", "refresh-2", None),
@@ -632,8 +628,6 @@ fn accounts_switch_needs_a_numeric_id() {
     assert!(hosts.compliance.requests().is_empty());
 }
 
-/// Starts `compliance login` with a launcher that claims to have opened the browser, and returns it with the
-/// `browser_opened` line it wrote first.
 #[cfg(target_os = "linux")]
 fn start_browser_login(hosts: &Hosts, launcher: &std::path::Path) -> (std::process::Child, Value) {
     use std::io::{BufRead, BufReader};
@@ -822,7 +816,6 @@ fn a_browser_answer_with_an_error_ends_the_login_and_stores_nothing() {
 fn an_invalid_grant_after_another_command_rotated_the_token_keeps_the_newer_sign_in() {
     let config = tempfile::tempdir().expect("a config folder");
     let folder = config.path().to_path_buf();
-    // Another command refreshed first: by the time Auth refuses this command's token, the file holds its successor.
     let auth = move |request: &Recorded| {
         let resource = request.form("resource").expect("a resource");
         let host = resource.strip_suffix("/api").expect("the API resource");

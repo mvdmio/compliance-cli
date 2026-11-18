@@ -10,9 +10,6 @@ use crate::output;
 
 const BROWSER_HANDOFF: &str = "browser-handoff";
 
-/// Turns an API answer into the CLI's output. A success prints its JSON body, `{"ok":true,"status":…}` when
-/// the body is empty, or, with `out`, writes the body there and prints a summary. A non-JSON body without
-/// `out` is refused, so no bytes reach stdout.
 pub fn print_response(response: Response<ureq::Body>, out: Option<&Path>) -> Result<(), Failure> {
     let status = response.status().as_u16();
     let content_type = header_text(&response, header::CONTENT_TYPE);
@@ -63,7 +60,6 @@ pub fn print_response(response: Response<ureq::Body>, out: Option<&Path>) -> Res
     Ok(())
 }
 
-/// The JSON body of a success, or the failure `print_response` would report for an error.
 pub fn read_json(response: Response<ureq::Body>) -> Result<Value, Failure> {
     let status = response.status().as_u16();
     let content_type = header_text(&response, header::CONTENT_TYPE);
@@ -85,13 +81,11 @@ fn print_empty_success(status: u16) -> Result<(), Failure> {
     Ok(())
 }
 
-/// A 403 `browser-handoff` becomes a Browser handoff; any other error body passes through as it came.
 pub fn problem(status: u16, content_type: Option<&str>, body: Vec<u8>) -> Failure {
     let Some(problem) = content_type
         .filter(|content_type| is_json(content_type))
         .and_then(|_| serde_json::from_slice::<Value>(&body).ok())
     else {
-        // An empty or non-JSON body (such as a proxy's HTML page) is not the API's; stderr stays JSON.
         return Failure::local(
             ErrorCode::Http,
             format!(
@@ -137,7 +131,6 @@ pub fn is_json(content_type: &str) -> bool {
     essence == "application/json" || essence.ends_with("+json")
 }
 
-/// The file name from `Content-Disposition` (RFC 6266): `filename*` when present, else `filename`.
 fn content_disposition_file_name(value: &str) -> Option<String> {
     let mut plain = None;
     for part in value.split(';').map(str::trim) {

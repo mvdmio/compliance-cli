@@ -1,9 +1,3 @@
-//! The Test-bed the E2E suite runs against, and the Scenario that runs the binary on it.
-//!
-//! The Test-bed comes from `COMPLIANCE_E2E_URL` and `COMPLIANCE_E2E_TOKEN`. When both are unset, the suite runs the
-//! Launcher once per test process with `--until-stdin-closes` and holds its stdin open, so the Launcher stops and
-//! cleans up when the test process ends, however it ends.
-
 use std::env;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -17,14 +11,12 @@ use tempfile::TempDir;
 use crate::support::{Run, command};
 use crate::timing;
 
-/// A running Test-bed: its address and the Personal token of seed user 1.
 pub struct TestBed {
     pub url: String,
     pub token: String,
 }
 
 impl TestBed {
-    /// The Test-bed's live API description, fetched without a credential, as the CLI fetches it.
     pub fn description(&self) -> Value {
         let url = format!("{}/openapi/v1.json", self.url.trim_end_matches('/'));
         let mut response = ureq::get(&url)
@@ -40,7 +32,6 @@ impl TestBed {
     }
 }
 
-/// The Launcher this process started. It is never dropped: its stdin closes when the process ends.
 struct Launcher {
     _child: Child,
     _stdin: ChildStdin,
@@ -52,7 +43,6 @@ struct Shared {
     _launcher: Option<Launcher>,
 }
 
-/// The one Test-bed every Scenario in this process shares.
 fn test_bed() -> &'static TestBed {
     static SHARED: OnceLock<Result<Shared, String>> = OnceLock::new();
     match SHARED.get_or_init(find_or_start) {
@@ -121,8 +111,6 @@ fn start_launcher() -> Result<Shared, String> {
     })
 }
 
-/// One Scenario: it holds the process-wide lock, so Scenarios run one at a time, and one config and cache folder,
-/// so the API description is fetched once per Scenario.
 pub struct Scenario {
     name: &'static str,
     test_bed: &'static TestBed,
@@ -133,7 +121,6 @@ pub struct Scenario {
 impl Scenario {
     pub fn start(name: &'static str) -> Self {
         static TURN: Mutex<()> = Mutex::new(());
-        // A Scenario that failed poisons the lock; the next one still runs.
         let turn = TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         Scenario {
             name,
@@ -147,18 +134,15 @@ impl Scenario {
         self.test_bed
     }
 
-    /// Runs `compliance <args>` against the Test-bed with its Personal token, and records the time it took.
     pub fn run(&self, args: &[&str]) -> Run {
         self.run_with_token(args, &self.test_bed.token)
     }
 
-    /// Runs `compliance <args>` against the Test-bed with `token` in place of its Personal token.
     pub fn run_with_token(&self, args: &[&str], token: &str) -> Run {
         let env = [
             ("COMPLIANCE_URL", self.test_bed.url.as_str()),
             ("COMPLIANCE_TOKEN", token),
         ];
-        // The config folder is also the working folder, so a file a command writes stays inside the Scenario.
         let folder = self.config.path();
         let mut command = command(folder, args, &env, folder);
         let started = Instant::now();

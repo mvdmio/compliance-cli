@@ -1,7 +1,3 @@
-//! What the Sweeps share: finding the read command at a path (`read_at`, for both), and, for the Read sweep, running
-//! a command once however often it is asked for and finding the values a command needs (path values, query values)
-//! in the lists the Test-bed prints.
-
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -10,33 +6,23 @@ use crate::operations::{LiveOperation, placeholders};
 use crate::support::Run;
 use crate::test_bed::Scenario;
 
-/// Where a value comes from: the field `field` of the first item in the list at `list`, a GET path in the live
-/// description whose placeholders the read's own path fills.
 struct Source {
     list: &'static str,
     field: &'static str,
 }
 
-/// A path parameter the path rule cannot explain.
 struct PathSource {
-    /// The read's path up to and including the parameter.
     read: &'static str,
     source: Source,
 }
 
-/// A query parameter a read needs although the description does not mark it required.
 struct QuerySource {
-    /// The read's path.
     read: &'static str,
-    /// The option the CLI names the parameter by.
     option: &'static str,
     source: Source,
 }
 
-/// Every path parameter not listed here takes the `id` of the first item in the list whose path the read extends:
-/// `/api/v1/risks/{id}/comments` takes it from `/api/v1/risks`.
 const PATH_SOURCES: [PathSource; 3] = [
-    // A Check Run has no list of its own: every Check Result names the run it came from.
     PathSource {
         read: "/api/v1/check-runs/{id}",
         source: Source {
@@ -44,7 +30,6 @@ const PATH_SOURCES: [PathSource; 3] = [
             field: "checkRunId",
         },
     },
-    // A Requirement is addressed by its code, not its id.
     PathSource {
         read: "/api/v1/frameworks/{frameworkId}/requirements/{code}",
         source: Source {
@@ -52,7 +37,6 @@ const PATH_SOURCES: [PathSource; 3] = [
             field: "code",
         },
     },
-    // Conversation messages are read by the Conversation's id, not a message's.
     PathSource {
         read: "/api/v1/conversations/{id}",
         source: Source {
@@ -62,33 +46,27 @@ const PATH_SOURCES: [PathSource; 3] = [
     },
 ];
 
-const QUERY_SOURCES: [QuerySource; 1] = [
-    // `invitations.preview` answers 422 without at least one Person.
-    QuerySource {
-        read: "/api/v1/invitations/preview",
-        option: "--person-ids",
-        source: Source {
-            list: "/api/v1/people",
-            field: "id",
-        },
+const QUERY_SOURCES: [QuerySource; 1] = [QuerySource {
+    read: "/api/v1/invitations/preview",
+    option: "--person-ids",
+    source: Source {
+        list: "/api/v1/people",
+        field: "id",
     },
-];
+}];
 
-/// The read in `operations` at `path` that the CLI has a command for.
 pub fn read_at<'a>(operations: &'a [LiveOperation], path: &str) -> Option<&'a LiveOperation> {
     operations.iter().find(|operation| {
         operation.is_read() && operation.path == path && operation.command.is_some()
     })
 }
 
-/// How one command went. A skipped command depends on an empty list.
 pub enum Verdict {
     Passed,
     Skipped(String),
     Failed(String),
 }
 
-/// Every command a Sweep ran, so a list that finds ids runs once, as its own read too.
 pub struct Lookup<'a> {
     pub operations: &'a [LiveOperation],
     scenario: &'a Scenario,
@@ -104,7 +82,6 @@ impl<'a> Lookup<'a> {
         }
     }
 
-    /// Runs `compliance <args>` once; a second call with the same arguments answers with the first run.
     pub fn run(&mut self, args: Vec<String>) -> &Run {
         let scenario = self.scenario;
         self.runs.entry(args).or_insert_with_key(|args| {
@@ -113,7 +90,6 @@ impl<'a> Lookup<'a> {
         })
     }
 
-    /// A value for every placeholder in `path`, in order, each from the first item of the list it depends on.
     pub fn path_values(&mut self, path: &str) -> Result<Vec<String>, Verdict> {
         let mut known: Vec<(&str, String)> = Vec::new();
         for name in placeholders(path) {
@@ -132,8 +108,6 @@ impl<'a> Lookup<'a> {
         Ok(known.into_iter().map(|(_, value)| value).collect())
     }
 
-    /// The option and value a read at `path` needs although the description does not mark it required: empty when
-    /// it needs none.
     pub fn query_args(&mut self, path: &str) -> Result<Vec<String>, Verdict> {
         let Some(query) = QUERY_SOURCES.iter().find(|query| query.read == path) else {
             return Ok(Vec::new());
@@ -142,8 +116,6 @@ impl<'a> Lookup<'a> {
         Ok(vec![query.option.to_string(), value])
     }
 
-    /// `field` of the first item that the list at `list` prints, its placeholders filled from `known`. An empty
-    /// list skips the read that depends on it.
     fn first_value(
         &mut self,
         list: &str,
@@ -177,7 +149,6 @@ impl<'a> Lookup<'a> {
                 )));
             }
         };
-        // A page (`{"items": [...]}`), or a bare array.
         let Some(items) = printed["items"].as_array().or(printed.as_array()) else {
             return Err(Verdict::Failed(format!(
                 "the list `{shown}` prints no `items`"

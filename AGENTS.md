@@ -54,10 +54,14 @@ off after 60 days without repository activity; re-enable it in the Actions tab.
 - `tests/`: tests that run the built binary against in-process fake Compliance and Auth hosts (`tests/support`).
   The tests never open a real browser: they run without a display, and the browser test on Linux puts a fake
   `xdg-open` first on `PATH`.
+- `tests/no_comments.rs`: the check that fails `cargo test` on any comment in a Rust file under `src/` or `tests/`.
+- `docs/adr/`: the architecture decision records. `0001-code-carries-no-comments.md` is the ban on comments.
 - `scripts/test-bed.sh`: the Launcher, which starts a Test-bed.
 - `tests/e2e/`: the E2E suite (`smoke.rs`: the smoke Scenarios; `sweeps.rs`: the Help sweep, the Read sweep, and the Write sweep;
   `write_sweep.rs`: the Write sweep's engine, which runs every write and reads back what it stored;
-  `write_table.rs`: what the description cannot say about a write, one entry per operation id;
+  `write_table.rs`: what the description cannot say about a write, one entry per write the description alone cannot
+  drive, each with its reason in `reason`, `skip`, or `no_read`; an entry goes in the table only where the
+  description's body is wrong;
   `lookup.rs`: what the Sweeps share, the read command at a path and the Read sweep's lookup of ids;
   `operations.rs`: the operations in the live description and the commands the CLI names them by, copied from
   `src/` and checked against the binary in `tests/generated.rs`; `test_bed.rs`: finding or starting the Test-bed
@@ -105,6 +109,10 @@ To cut a release:
 - Every output is JSON, except `--help`, `--version`, and `compliance skill` (Markdown). Exit codes: 0 success, 1 error, 2 usage, 3 Browser
   handoff.
 - Tests drive the binary as an Agent does: arguments and environment in; stdout, stderr, the exit code, and the
-  requests that reached the fake server out. They never check internal types.
+  requests that reached the fake server out. They never check internal types. The exception is
+  `tests/no_comments.rs`, which reads the source files instead of running the binary.
+- Code carries no comments: not `//`, `/* */`, `///`, `//!`, `/** */`, or `/*! */`. `cargo test` enforces it. Explain
+  the code through names and structure, put a lint's reason in `#[allow(lint, reason = "…")]`, and record any other
+  reason in an ADR. See [docs/adr/0001-code-carries-no-comments.md](docs/adr/0001-code-carries-no-comments.md).
 - TLS is rustls only: `cargo tree -i openssl-sys` must find nothing.
 - No telemetry.

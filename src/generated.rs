@@ -1,5 +1,3 @@
-//! The commands built from the API description, beside the hand-written ones.
-
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -13,7 +11,6 @@ use crate::openapi::{Kind, Operation, Parameter, Schema, kebab_case};
 pub const BODY: &str = "body";
 pub const OUT: &str = "out";
 pub const FILE: &str = "file";
-/// Option names no parameter may take, even on a command without that option.
 const GLOBAL_OPTIONS: [&str; 4] = ["help", BODY, OUT, FILE];
 
 pub fn path_id(parameter: &Parameter) -> String {
@@ -28,14 +25,12 @@ pub fn field_id(parameter: &Parameter) -> String {
     format!("field:{}", parameter.name)
 }
 
-/// Where the upload id `--file` fills goes.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Location {
     Query,
     Body,
 }
 
-/// The parameter `--file` fills: the first query parameter or body field with an upload target.
 pub struct UploadSlot<'a> {
     pub parameter: &'a Parameter,
     pub location: Location,
@@ -50,7 +45,6 @@ impl UploadSlot<'_> {
         }
     }
 
-    /// Whether `parameter`, found at `location`, is this slot.
     pub fn is(&self, parameter: &Parameter, location: Location) -> bool {
         self.location == location && std::ptr::eq(self.parameter, parameter)
     }
@@ -75,9 +69,6 @@ pub fn upload_slot(operation: &Operation) -> Option<UploadSlot<'_>> {
     })
 }
 
-/// Whether the command line can be parsed by the hand-written commands alone: no command, `--version`, or a
-/// hand-written command. A group the hand-written commands share with generated ones, such as `accounts`,
-/// needs the description unless a hand-written action follows it.
 pub fn needs_description(handwritten: &Command, args: &[OsString]) -> bool {
     let Some(first) = token(args, 1) else {
         return false;
@@ -97,8 +88,6 @@ pub fn needs_description(handwritten: &Command, args: &[OsString]) -> bool {
     }
 }
 
-/// Whether the command line names a group or action that neither the hand-written commands nor `operations`
-/// know.
 pub fn names_unknown_command(
     handwritten: &Command,
     operations: &[Operation],
@@ -134,9 +123,6 @@ fn is_name(token: &str) -> bool {
     !token.starts_with('-') && token != "help"
 }
 
-/// The hand-written commands with every generated group and action added, and the operations reachable
-/// through them. A hand-written command wins over a generated one of the same name: a hand-written command
-/// without actions hides the whole group, and a hand-written action hides only that action.
 pub fn tree(handwritten: Command, operations: &[Operation]) -> (Command, Vec<&Operation>) {
     let mut groups: BTreeMap<&str, Vec<&Operation>> = BTreeMap::new();
     for operation in operations {
@@ -169,7 +155,6 @@ pub fn tree(handwritten: Command, operations: &[Operation]) -> (Command, Vec<&Op
     (root, reachable)
 }
 
-/// The operation a parsed command line names, with the matches of its action.
 pub fn operation_for<'a, 'm>(
     matches: &'m ArgMatches,
     reachable: &[&'a Operation],
@@ -200,9 +185,6 @@ fn group_command(group: &str, members: &[&Operation]) -> Command {
         .disable_help_subcommand(true)
 }
 
-/// One operation as a command. Names are claimed in a fixed order: the global options, then query parameters,
-/// then body fields. A name already taken gets the prefix `query-` or `field-`, then a number, and its help
-/// says so.
 fn action(operation: &Operation) -> Command {
     let summary = operation
         .summary
@@ -288,7 +270,6 @@ fn action(operation: &Operation) -> Command {
     )
 }
 
-/// `--file`, which uploads a file and sends its upload id in place of `--<long>`, and the note `--<long>` gets.
 fn file_option(slot: &UploadSlot, long: &str, notes: &mut Vec<String>) -> Arg {
     notes.push(format!("Or pass --{FILE}."));
     let mut help = format!(
@@ -309,7 +290,6 @@ fn file_option(slot: &UploadSlot, long: &str, notes: &mut Vec<String>) -> Arg {
     arg.help(help)
 }
 
-/// The option name for `name`, and a note when it had to differ.
 fn claim(taken: &mut HashSet<String>, name: &str, prefix: &str) -> (String, Vec<String>) {
     let wanted = kebab_case(name);
     let wanted = if wanted.is_empty() {
@@ -368,7 +348,6 @@ fn type_name(schema: &Schema) -> String {
     }
 }
 
-/// Parses an argument into the JSON value it sends, so a wrong type is a usage mistake before any request.
 fn value_parser(schema: &Schema) -> ValueParser {
     match schema.kind {
         Kind::String if !schema.choices.is_empty() => {

@@ -1,5 +1,3 @@
-//! Drives the built `compliance` binary against in-process fake Compliance and Auth hosts.
-
 #![allow(dead_code)]
 
 use std::fs;
@@ -13,7 +11,6 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
-/// One request as it reached the fake server.
 #[derive(Clone, Debug)]
 pub struct Recorded {
     pub method: String,
@@ -30,12 +27,10 @@ impl Recorded {
             .map(|(_, value)| value.as_str())
     }
 
-    /// The path without its query string.
     pub fn path(&self) -> &str {
         self.url.split('?').next().unwrap_or_default()
     }
 
-    /// One field of a form body, or of the query string.
     pub fn form(&self, name: &str) -> Option<String> {
         let body = std::str::from_utf8(&self.body).unwrap_or_default();
         let query = self
@@ -46,13 +41,11 @@ impl Recorded {
         form_value(body, name).or_else(|| form_value(query, name))
     }
 
-    /// `http://<Host>`, so a fake can hand out absolute links to itself.
     pub fn origin(&self) -> String {
         format!("http://{}", self.header("Host").expect("a Host header"))
     }
 }
 
-/// The JSON body of a request.
 pub fn body_json(request: &Recorded) -> Value {
     serde_json::from_slice(&request.body).expect("a JSON body")
 }
@@ -68,7 +61,6 @@ pub fn form_value(encoded: &str, name: &str) -> Option<String> {
     })
 }
 
-/// The fake server's answer to one request.
 pub struct Reply {
     pub status: u16,
     pub headers: Vec<(String, String)>,
@@ -108,7 +100,6 @@ impl Reply {
 
 type Handler = dyn Fn(&Recorded) -> Reply + Send + Sync;
 
-/// A fake Compliance host on `127.0.0.1:<free port>` that records every request.
 pub struct FakeServer {
     server: Arc<tiny_http::Server>,
     requests: Arc<Mutex<Vec<Recorded>>>,
@@ -151,7 +142,6 @@ impl FakeServer {
                                 .expect("a valid header"),
                         );
                     }
-                    // Ignored: the CLI may hang up early, which the test itself then reports.
                     let _ = request.respond(response);
                 }
             })
@@ -190,7 +180,6 @@ impl Drop for FakeServer {
     }
 }
 
-/// What one run of the binary left behind.
 #[derive(Debug)]
 pub struct Run {
     pub code: i32,
@@ -199,7 +188,6 @@ pub struct Run {
 }
 
 impl Run {
-    /// What a finished run printed. A run a signal ended has code -1.
     pub fn from_output(output: std::process::Output) -> Self {
         Run {
             code: output.status.code().unwrap_or(-1),
@@ -219,10 +207,8 @@ impl Run {
     }
 }
 
-/// The Personal token the tests pass in `COMPLIANCE_TOKEN`.
 pub const TOKEN: &str = "cmp_pat_test";
 
-/// Runs `compliance <args>` against `server` with the Personal token `TOKEN`.
 pub fn compliance_with_token(server: &FakeServer, args: &[&str]) -> Run {
     compliance(
         args,
@@ -233,7 +219,6 @@ pub fn compliance_with_token(server: &FakeServer, args: &[&str]) -> Run {
     )
 }
 
-/// Runs `compliance <args>` with only the given `COMPLIANCE_*` variables set.
 pub fn compliance(args: &[&str], env: &[(&str, &str)]) -> Run {
     compliance_in(Path::new("."), args, env)
 }
@@ -246,9 +231,6 @@ pub fn compliance_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
     Run::from_output(output)
 }
 
-/// The binary with no display, so `login` never opens a real browser, and with `config` as the config folder
-/// and `config/cache` as the cache folder unless `env` names them, so the stored sign-in and cached API
-/// description of the person running the tests stay out.
 pub fn command(dir: &Path, args: &[&str], env: &[(&str, &str)], config: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_compliance"));
     command.current_dir(dir).args(args);
@@ -268,14 +250,12 @@ pub fn command(dir: &Path, args: &[&str], env: &[(&str, &str)], config: &Path) -
 
 pub const DESCRIPTION_PATH: &str = "/openapi/v1.json";
 
-/// The fixture API description in `tests/fixtures/openapi.json`.
 pub fn fixture() -> Value {
     serde_json::from_str(include_str!("../fixtures/openapi.json")).expect("the fixture is JSON")
 }
 
 pub const RESOURCE_PATH: &str = "/api";
 
-/// Compliance's Protected Resource Metadata, naming `auth` as the authorization server.
 pub fn resource_metadata(request: &Recorded, auth: &str) -> Option<Reply> {
     (request.path() == "/.well-known/oauth-protected-resource/api").then(|| {
         let body = json!({
@@ -287,7 +267,6 @@ pub fn resource_metadata(request: &Recorded, auth: &str) -> Option<Reply> {
     })
 }
 
-/// Auth's discovery document, with its endpoints under `/connect/`.
 pub fn auth_metadata(request: &Recorded) -> Option<Reply> {
     (request.path() == "/.well-known/openid-configuration").then(|| {
         let origin = request.origin();
@@ -319,7 +298,6 @@ pub fn tokens(access_token: &str, refresh_token: &str, id_token: Option<&str>) -
     Reply::json(200, &body.to_string())
 }
 
-/// An unsigned JWT with the User's name and email, as the CLI reads only the claims.
 pub fn id_token(name: &str, email: &str) -> String {
     let part = |value: Value| URL_SAFE_NO_PAD.encode(value.to_string());
     format!(
@@ -346,7 +324,6 @@ pub fn credentials_path(config: &Path) -> std::path::PathBuf {
     config.join("credentials.json")
 }
 
-/// Stores a sign-in for `host` as `compliance login` leaves it.
 pub fn store_sign_in(
     config: &Path,
     host: &str,

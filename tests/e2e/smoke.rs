@@ -1,6 +1,3 @@
-//! The smoke Scenarios: one per CLI surface. Each checks what the CLI promises (the exit code, valid JSON, and the
-//! fields the command names), never Compliance's business rules.
-
 use serde_json::{Value, json};
 
 use crate::test_bed::Scenario;
@@ -21,7 +18,6 @@ fn status() {
         json!({ "kind": "personal-token", "source": "COMPLIANCE_TOKEN" }),
         "{run:#?}"
     );
-    // A Personal token carries no `id_token`, so `status` names no User for it.
     assert_eq!(status["user"], json!(null), "{run:#?}");
     assert_eq!(status["account"]["id"], json!(1), "{run:#?}");
     assert_eq!(status["account"]["current"], json!(true), "{run:#?}");
@@ -41,7 +37,6 @@ fn accounts() {
         "{list:#?}"
     );
 
-    // Account 2 has no Compliance License, so nothing but the switch back runs while the token is there.
     let back = BackToAccountOne(&scenario);
     let switch = scenario.run(&["accounts", "switch", "2"]);
     assert_eq!(switch.code, 0, "{switch:#?}");
@@ -53,14 +48,11 @@ fn accounts() {
     drop(back);
 }
 
-/// Switches the shared Personal token back to Account 1 when dropped, so a failed assertion on Account 2 never
-/// leaves the token there for the next Scenario.
 struct BackToAccountOne<'a>(&'a Scenario);
 
 impl Drop for BackToAccountOne<'_> {
     fn drop(&mut self) {
         let run = self.0.run(&["accounts", "switch", "1"]);
-        // A second panic while unwinding aborts the whole run, so a failing Scenario only says so on stderr.
         if std::thread::panicking() {
             if run.code != 0 {
                 eprintln!(
@@ -74,17 +66,14 @@ impl Drop for BackToAccountOne<'_> {
     }
 }
 
-/// The array `value[field]`, or an empty one when it is missing or not an array.
 fn array_field<'a>(value: &'a Value, field: &str) -> &'a [Value] {
     value[field].as_array().map_or(&[], Vec::as_slice)
 }
 
-/// Whether `value[field]` is a non-empty string, as an id is.
 fn has_text(value: &Value, field: &str) -> bool {
     value[field].as_str().is_some_and(|text| !text.is_empty())
 }
 
-/// The id of the Account an Account list marks `current`.
 fn current_account(list: &Value) -> Option<i64> {
     array_field(list, "items")
         .iter()
@@ -124,7 +113,6 @@ fn api() {
 fn generated_write_with_body() {
     let scenario = Scenario::start("generated write with --body");
 
-    // Only the fields `risks.create` requires. The Risk stays on the Test-bed.
     let run = scenario.run(&[
         "risks",
         "create",
@@ -142,7 +130,6 @@ fn generated_write_with_body() {
 fn bad_token() {
     let scenario = Scenario::start("bad token");
 
-    // Well formed (`mvdm_pat_` and 32 bytes in base64url), but no row on the Test-bed holds its hash.
     let token = format!("mvdm_pat_{}", "A".repeat(43));
     let run = scenario.run_with_token(&["status"], &token);
 
@@ -150,8 +137,6 @@ fn bad_token() {
     assert!(run.stderr_json().is_object(), "{run:#?}");
 }
 
-/// One upload part as Compliance issues it: 25 MiB, `ImportUploadStagingService.PartSizeBytes` in `mvdmio-suite`.
-/// Should that grow, the part-sized upload goes in one request, and this must follow it.
 const PART_BYTES: usize = 25 * 1024 * 1024;
 
 #[test]
@@ -168,8 +153,6 @@ fn file_to_evidence_in_parts() {
     upload_evidence(&scenario, "large.txt", PART_BYTES + 1024);
 }
 
-/// Writes a file of `length` bytes and runs `evidence create --file` on it. Evidence accepts 50 MiB per file, so it
-/// can take a file larger than one part; a Conversation upload (25 MiB) cannot. The Evidence stays on the Test-bed.
 fn upload_evidence(scenario: &Scenario, name: &str, length: usize) {
     let folder = tempfile::tempdir().expect("a temporary folder for the file");
     let path = folder.path().join(name);
@@ -177,7 +160,6 @@ fn upload_evidence(scenario: &Scenario, name: &str, length: usize) {
     std::fs::write(&path, bytes).expect("write the file to upload");
     let path = path.to_str().expect("a UTF-8 temporary path");
 
-    // `title` is the one field `evidence.create` requires beside the upload.
     let run = scenario.run(&[
         "evidence",
         "create",
@@ -199,7 +181,6 @@ fn chat_send() {
 
     let run = scenario.run(&["chat", "send", "Hello from the E2E suite."]);
 
-    // Scripted Turns still debit Account 1's Assistant allowance, which the Launcher funds.
     let out_of_funds = run
         .stderr
         .lines()
@@ -211,7 +192,6 @@ fn chat_send() {
          failure. {run:#?}"
     );
     assert_eq!(run.code, 0, "{run:#?}");
-    // `chat send` prints only once the turn is idle, so an answer at all says the conversation is idle.
     let chat = run.stdout_json();
     assert!(has_text(&chat, "conversationId"), "{run:#?}");
     assert!(

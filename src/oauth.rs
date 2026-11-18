@@ -10,13 +10,10 @@ use crate::failure::{ErrorCode, Failure};
 use crate::http;
 use crate::store::{self, SignIn, User};
 
-/// The CLI's pre-registered public client at Auth.
 pub const CLIENT_ID: &str = "mvdmio.compliance_cli";
 
-/// Asked for on authorize and device requests, so the token response carries an `id_token` with the User.
 pub const SCOPE: &str = "openid";
 
-/// An OAuth error answer (RFC 6749 §5.2).
 pub struct OAuthError {
     pub error: String,
     pub description: Option<String>,
@@ -45,7 +42,6 @@ struct TokenResponse {
     id_token: Option<String>,
 }
 
-/// Posts a form to an Auth endpoint: the JSON body of a 2xx, or the OAuth error of anything else.
 pub fn post_form(
     agent: &Agent,
     url: &str,
@@ -67,8 +63,6 @@ pub fn post_form(
     }))
 }
 
-/// Asks the token endpoint for tokens: the new sign-in, or the OAuth error. `previous` keeps the refresh token
-/// and the User when the answer leaves them out.
 pub fn request_tokens(
     agent: &Agent,
     server: &AuthServer,
@@ -99,7 +93,6 @@ pub fn request_tokens(
     }))
 }
 
-/// Revokes a token (RFC 7009). Auth answers 200 for a token it no longer knows, too.
 pub fn revoke(agent: &Agent, server: &AuthServer, sign_in: &SignIn) -> Result<(), Failure> {
     let (token, hint) = match &sign_in.refresh_token {
         Some(refresh_token) => (refresh_token.as_str(), "refresh_token"),
@@ -114,8 +107,6 @@ pub fn revoke(agent: &Agent, server: &AuthServer, sign_in: &SignIn) -> Result<()
     Ok(())
 }
 
-/// The User named in an `id_token`. The token came straight from Auth's token endpoint over the connection the
-/// CLI opened, so its claims are read without checking the signature (OpenID Connect Core §3.1.3.7).
 fn user_of(id_token: &str) -> Option<User> {
     let payload = id_token.split('.').nth(1)?;
     let bytes = URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
@@ -127,7 +118,6 @@ fn user_of(id_token: &str) -> Option<User> {
     })
 }
 
-/// A random URL-safe string with `bytes` bytes of entropy, for PKCE and `state`.
 pub fn random_text(bytes: usize) -> String {
     let mut buffer = vec![0u8; bytes];
     SystemRandom::new()
@@ -136,7 +126,6 @@ pub fn random_text(bytes: usize) -> String {
     URL_SAFE_NO_PAD.encode(buffer)
 }
 
-/// The PKCE S256 challenge for a verifier (RFC 7636 §4.2).
 pub fn challenge_of(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(ring::digest::digest(
         &ring::digest::SHA256,

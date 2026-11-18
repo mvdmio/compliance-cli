@@ -9,7 +9,6 @@ use crate::http::Client;
 use crate::request;
 use crate::response;
 
-/// `compliance api <method> <path>`: one raw call with the current credential.
 pub fn run(args: ApiArgs) -> Result<(), Failure> {
     let method = method(&args.method)?;
     if !args.path.starts_with('/') || PathAndQuery::from_str(&args.path).is_err() {

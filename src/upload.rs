@@ -1,10 +1,3 @@
-//! `--file`: sends one file through an Upload link and yields its upload id.
-//!
-//! The link takes the bytes without a bearer: a file up to `partSize` goes as one `PUT <url>`, a larger one as
-//! `PUT <url>?offset=N` parts and then `POST <url>/finish`. A 409 naming `bytesReceived` says where to go on
-//! from; after a request that got no usable answer, `GET <url>` says it. Once a whole-file `PUT` has failed, the
-//! rest goes as parts, because the link refuses a second whole file once it holds any byte.
-
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -19,11 +12,8 @@ use crate::http::{self, Client};
 use crate::response;
 
 const UPLOADS_PATH: &str = "/api/v1/uploads";
-/// Tries in a row that move no byte forward before the upload gives up.
 const MAX_STALLED_TRIES: u32 = 5;
 
-/// Uploads every file in `paths` through its own Upload link for `slot` and returns the upload ids: a list when
-/// the slot takes one, else the one id. Every file is opened before the first request.
 pub fn send_all(
     client: &mut Client,
     slot: &UploadSlot,
@@ -44,7 +34,6 @@ pub fn send_all(
     })
 }
 
-/// One file to send, opened.
 struct Source<'a> {
     file: File,
     path: &'a Path,
@@ -77,7 +66,6 @@ impl<'a> Source<'a> {
     }
 }
 
-/// Uploads `source` to a new Upload link for `target` and returns the link's upload id.
 fn send(client: &mut Client, target: &str, source: Source) -> Result<Value, Failure> {
     let request = json!({ "target": target, "fileName": source.file_name });
     let answer = client.send(
@@ -109,7 +97,6 @@ fn send(client: &mut Client, target: &str, source: Source) -> Result<Value, Fail
     Ok(link.upload_id)
 }
 
-/// The answer of `POST /api/v1/uploads`.
 struct Link {
     url: String,
     upload_id: Value,
@@ -150,13 +137,9 @@ impl Link {
     }
 }
 
-/// How the link took one request, as `classify` reads its answer.
 enum Answer {
-    /// A 2xx, with the upload's status when the body carried one.
     Accepted(Option<Status>),
-    /// A 409 naming the bytes the link holds: go on from there.
     Holds(u64),
-    /// A network error or a 5xx: ask the link where it stands.
     Lost,
 }
 
@@ -183,9 +166,6 @@ struct Sender<'a> {
 impl Sender<'_> {
     fn send(&mut self) -> Result<(), Failure> {
         let length = self.source.length;
-        // `None` sends the whole file in one `PUT`. `Some(offset)` sends the part at `offset`, or finishes once
-        // `offset` is the file's length. Every request that does not end the upload leaves `Some`, so the rest goes
-        // as parts.
         let mut offset = (length > self.link.part_size).then_some(0);
         let mut stalled = 0;
         loop {
@@ -232,7 +212,6 @@ impl Sender<'_> {
         self.link.part_size.min(self.source.length - offset)
     }
 
-    /// `PUT <url>` with the whole file, or `PUT <url>?offset=N` with the part at `offset`.
     fn put(&mut self, offset: Option<u64>) -> Result<Answer, Failure> {
         let start = offset.unwrap_or(0);
         let bytes = self.read(start, self.part_length(start))?;
@@ -259,7 +238,6 @@ impl Sender<'_> {
         classify(&url, result)
     }
 
-    /// `GET <url>`: where the upload stands, or `None` when the link could not say.
     fn status(&self) -> Result<Option<Status>, Failure> {
         let result = self
             .agent
@@ -272,7 +250,6 @@ impl Sender<'_> {
         })
     }
 
-    /// The `length` bytes at `offset`, read from the file on their own.
     fn read(&mut self, offset: u64, length: u64) -> Result<Vec<u8>, Failure> {
         let path = self.source.path;
         let file_failure = |error: io::Error| Failure::file(path, error);

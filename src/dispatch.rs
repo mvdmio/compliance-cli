@@ -1,5 +1,3 @@
-//! Turns the arguments of a generated command into its request.
-
 use std::path::PathBuf;
 
 use clap::ArgMatches;
@@ -14,7 +12,6 @@ use crate::request::{self, UNRESERVED, path_segment};
 use crate::response;
 use crate::upload;
 
-/// Also keeps the characters OData expressions use.
 const QUERY: &AsciiSet = &UNRESERVED
     .remove(b'$')
     .remove(b'\'')
@@ -27,9 +24,7 @@ const QUERY: &AsciiSet = &UNRESERVED
     .remove(b'!')
     .remove(b'*');
 
-/// Uploads each `--file` through an Upload link first; the call then carries the upload ids.
 pub fn run(operation: &Operation, matches: &ArgMatches) -> Result<(), Failure> {
-    // Only an operation with an upload target has `--file`.
     let files: Vec<&PathBuf> = matches
         .try_get_many::<PathBuf>(FILE)
         .ok()
@@ -43,7 +38,6 @@ pub fn run(operation: &Operation, matches: &ArgMatches) -> Result<(), Failure> {
         .filter(|slot| slot.location == Location::Body)
         .map(|slot| slot.parameter);
     let mut body = body(operation, matches, upload_field)?;
-    // Only a download has `--out`.
     let out = matches.try_get_one::<PathBuf>(OUT).ok().flatten();
 
     let mut client = Client::signed_in()?;
@@ -63,7 +57,6 @@ pub fn run(operation: &Operation, matches: &ArgMatches) -> Result<(), Failure> {
     response::print_response(answer, out.map(PathBuf::as_path))
 }
 
-/// The path with its placeholders filled, and the query string. `uploaded` stands in for its slot's values.
 fn target(
     operation: &Operation,
     matches: &ArgMatches,
@@ -104,8 +97,6 @@ fn target(
     path
 }
 
-/// `--body` with the field options set on top of it. A required body with no input is `{}`. `upload` is the
-/// field `--file` fills later, which counts as a field option.
 fn body(
     operation: &Operation,
     matches: &ArgMatches,
@@ -151,7 +142,6 @@ fn body(
     Ok(Some(value))
 }
 
-/// A string as it is; any other value as JSON text.
 fn text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),

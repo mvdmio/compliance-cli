@@ -9,7 +9,6 @@ use support::{FakeServer, Recorded, Reply, compliance_with_token};
 const CREATED: &str = "c0ffee00-0000-4000-8000-000000000001";
 const SPLIT: &str = "5b1170ff-0000-4000-8000-000000000002";
 
-/// Plays the three conversation operations. The send answers `send`; each read answers the next of `reads`.
 fn conversations(send: Reply, reads: Vec<Value>) -> FakeServer {
     let send = Mutex::new(Some(send));
     let reads = Mutex::new(VecDeque::from(reads));

@@ -1,22 +1,15 @@
-//! The operations in an API description, and the commands the CLI names them by.
-//!
-//! The crate has no library target, so the rules below are copies of the CLI's own: `operations`, `is_download`,
-//! `placeholders`, `parameters`, `body`, `body_schema`, `schema`, and `kebab_case` in `src/openapi.rs`, `is_json`
-//! in `src/response.rs`, and `tree` and `claim` in `src/generated.rs`. `tests/generated.rs` checks them against the
-//! binary on every push, so a change there that these do not follow fails before the nightly E2E run.
-
-// Shared with `tests/generated.rs`, which uses only part of it.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared with tests/generated.rs, which uses only part of it"
+)]
 
 use std::collections::HashSet;
 
 use serde_json::Value;
 use ureq::http::Method;
 
-/// Option names no parameter may take (`GLOBAL_OPTIONS` in `src/generated.rs`).
 pub const GLOBAL_OPTIONS: [&str; 4] = ["help", "body", "out", "file"];
 
-/// The methods the CLI reads operations under (`METHODS` in `src/openapi.rs`).
 const METHODS: [(&str, Method); 7] = [
     ("get", Method::GET),
     ("put", Method::PUT),
@@ -27,14 +20,10 @@ const METHODS: [(&str, Method); 7] = [
     ("patch", Method::PATCH),
 ];
 
-/// The hand-written commands that take no action (`Command` in `src/cli.rs`). A generated group of the same name is
-/// hidden behind them, as `tree` in `src/generated.rs` does.
 const HANDWRITTEN_LEAVES: [&str; 5] = ["login", "logout", "status", "api", "skill"];
 
-/// The most `$ref` hops followed to reach a path item (`MAX_REF_DEPTH` in `src/openapi.rs`).
 const MAX_REF_DEPTH: usize = 16;
 
-/// A command the CLI names an operation by: `compliance <group> <action>`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CommandName {
     pub group: String,
@@ -42,24 +31,18 @@ pub struct CommandName {
 }
 
 impl CommandName {
-    /// The CLI's rule: the `operationId` is split on its first `.` into group and action, and each part is
-    /// kebab-cased. `None` when either part comes out empty.
     pub fn from_operation_id(operation_id: &str) -> Option<Self> {
         let (group, action) = operation_id.split_once('.')?;
         let (group, action) = (kebab_case(group), kebab_case(action));
         (!group.is_empty() && !action.is_empty()).then_some(CommandName { group, action })
     }
 
-    /// Whether the CLI builds a generated command under this name: `tree` drops a group or action named `help`,
-    /// and every group a hand-written command without actions hides. `accounts list` and `accounts switch` stay:
-    /// the hand-written actions answer in their place.
     pub fn is_generated(&self) -> bool {
         self.group != "help"
             && self.action != "help"
             && !HANDWRITTEN_LEAVES.contains(&self.group.as_str())
     }
 
-    /// `<group> <action>`, the start of the command's arguments.
     pub fn args(&self) -> Vec<String> {
         vec![self.group.clone(), self.action.clone()]
     }
@@ -71,46 +54,33 @@ impl std::fmt::Display for CommandName {
     }
 }
 
-/// The type a command option parses (`Kind` in `src/openapi.rs`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     String,
     Integer,
     Number,
     Boolean,
-    /// An object, a `oneOf`, or a `$ref`: given as JSON text.
     Json,
 }
 
-/// A query parameter or a top-level body field, with the option the CLI gives it.
 pub struct LiveParameter {
     pub name: String,
-    /// The `--<option>` the CLI names it by, after the clash rule.
     pub option: String,
     pub kind: Kind,
-    /// Many values of `kind`, one per use of the option.
     pub array: bool,
     pub format: Option<String>,
-    /// The allowed values of a string, integer, or number, as typed.
     pub choices: Vec<String>,
     pub required: bool,
-    /// `x-upload-target`: the value is an upload id, which `--file` fills.
     pub upload_target: Option<String>,
 }
 
-/// One operation in the description, with the command the CLI names it by.
 pub struct LiveOperation {
-    /// The `operationId`, such as `risks.create`.
     pub id: String,
-    /// `None` when the operation has no `<group>.<action>` `operationId`, so the CLI offers no command for it.
     pub command: Option<CommandName>,
     pub method: Method,
-    /// The path template, such as `/api/v1/risks/{id}`.
     pub path: String,
-    /// The answer is a file, not JSON, so the command needs `--out`.
     pub download: bool,
     pub query: Vec<LiveParameter>,
-    /// The top-level properties of an object body: none without a body or with a `oneOf` body.
     pub body_fields: Vec<LiveParameter>,
 }
 
@@ -124,8 +94,6 @@ impl LiveOperation {
     }
 }
 
-/// Every operation in `description`, in document order, as `operations` in `src/openapi.rs` reads them. Unlike
-/// the CLI, it keeps an operation whose name an earlier one holds.
 pub fn live_operations(description: &Value) -> Vec<LiveOperation> {
     let Some(paths) = description["paths"].as_object() else {
         panic!("the description has no `paths`");
@@ -157,15 +125,12 @@ pub fn live_operations(description: &Value) -> Vec<LiveOperation> {
     operations
 }
 
-/// The query parameters and body fields of `operation` with the option the CLI names each by. Names are claimed in
-/// the CLI's order: the global options, the query parameters, the body fields.
 fn options(
     document: &Value,
     item: &Value,
     operation: &Value,
 ) -> (Vec<LiveParameter>, Vec<LiveParameter>) {
     let mut taken: HashSet<String> = GLOBAL_OPTIONS.iter().map(|name| name.to_string()).collect();
-    // The operation's own parameter replaces the path item's one of the same name and location.
     let mut listed: Vec<(&str, &str, &Value)> = Vec::new();
     for parameter in item["parameters"]
         .as_array()
@@ -249,8 +214,6 @@ fn live_parameter(
     }
 }
 
-/// The option name for `name` (`claim` in `src/generated.rs`): its kebab case, or `<prefix>-` before it when that
-/// is taken, then a number.
 fn claim(taken: &mut HashSet<String>, name: &str, prefix: &str) -> String {
     let wanted = kebab_case(name);
     let wanted = if wanted.is_empty() {
@@ -270,8 +233,6 @@ fn claim(taken: &mut HashSet<String>, name: &str, prefix: &str) -> String {
     long
 }
 
-/// The body schema with `$ref` followed and a nullable `oneOf` taken as its one shape (`body_schema` in
-/// `src/openapi.rs`).
 fn body_schema<'a>(document: &'a Value, schema: &'a Value) -> &'a Value {
     let mut schema = schema;
     for _ in 0..MAX_REF_DEPTH {
@@ -291,7 +252,6 @@ fn body_schema<'a>(document: &'a Value, schema: &'a Value) -> &'a Value {
     schema
 }
 
-/// What `schema` in `src/openapi.rs` reads from a schema.
 struct Schema {
     kind: Kind,
     array: bool,
@@ -347,7 +307,6 @@ fn schema(schema: &Value) -> Schema {
     }
 }
 
-/// `type` as a list, without `null`.
 fn types(schema: &Value) -> Vec<&str> {
     match &schema["type"] {
         Value::String(name) => vec![name.as_str()],
@@ -368,7 +327,6 @@ fn text(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The placeholder names in a path template, in order (`placeholders` in `src/openapi.rs`).
 pub fn placeholders(path: &str) -> Vec<&str> {
     path.split('{')
         .skip(1)
@@ -376,7 +334,6 @@ pub fn placeholders(path: &str) -> Vec<&str> {
         .collect()
 }
 
-/// The first 2xx response has content, and none of it is JSON (`is_download` in `src/openapi.rs`).
 fn is_download(document: &Value, responses: &Value) -> bool {
     let Some(responses) = responses.as_object() else {
         return false;
@@ -395,7 +352,6 @@ fn is_download(document: &Value, responses: &Value) -> bool {
     !content.is_empty() && !content.keys().any(|media_type| is_json(media_type))
 }
 
-/// A JSON media type (`is_json` in `src/response.rs`).
 fn is_json(content_type: &str) -> bool {
     let essence = content_type
         .split(';')
@@ -406,7 +362,6 @@ fn is_json(content_type: &str) -> bool {
     essence == "application/json" || essence.ends_with("+json")
 }
 
-/// Follows a local `$ref` to what it names, as `resolve` in `src/openapi.rs` does.
 fn resolve<'a>(document: &'a Value, value: &'a Value) -> &'a Value {
     let mut value = value;
     for _ in 0..MAX_REF_DEPTH {
@@ -422,9 +377,6 @@ fn resolve<'a>(document: &'a Value, value: &'a Value) -> &'a Value {
     value
 }
 
-/// Kebab case as the CLI writes it (`kebab_case` in `src/openapi.rs`): a word starts at an upper-case letter after a
-/// lower-case letter or digit, or at the last capital of a run of capitals before a lower-case letter, and every
-/// run of other characters becomes one `-`.
 fn kebab_case(name: &str) -> String {
     let characters: Vec<char> = name.chars().collect();
     let mut kebab = String::new();

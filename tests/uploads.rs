@@ -15,14 +15,10 @@ use tempfile::TempDir;
 const PART_SIZE: u64 = 4;
 const CREATED: &str = "{\"id\":\"e1\",\"title\":\"T\"}";
 
-/// What the fake Upload link does to one `PUT`, until `times` runs out.
 #[derive(Clone, Copy)]
 enum Fault {
-    /// Answers 503 and keeps nothing, as when the part was lost on the way.
     Unavailable,
-    /// Keeps the part, then answers 409 with `bytesReceived`, as when the part arrived twice.
     Conflict,
-    /// Keeps the first half of the bytes and answers 503, as when the connection broke off midway.
     Dropped,
 }
 
@@ -35,13 +31,10 @@ struct Link {
 #[derive(Default)]
 struct Links {
     links: HashMap<String, Link>,
-    /// By the `PUT`'s offset: `None` for a whole-file `PUT`.
     faults: HashMap<Option<u64>, (Fault, u32)>,
     max_bytes: Option<u64>,
 }
 
-/// A fake Compliance host that serves the fixture description, `POST /api/v1/uploads`, and the Upload links it
-/// hands out under `/uploads/<token>`, with a part size of `PART_SIZE`.
 struct Host {
     server: FakeServer,
     links: Arc<Mutex<Links>>,
@@ -238,7 +231,6 @@ fn conflict(link: &Link) -> Reply {
     )
 }
 
-/// Each request as `METHOD path?query`.
 fn lines(requests: &[Recorded]) -> Vec<String> {
     requests
         .iter()

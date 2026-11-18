@@ -23,11 +23,9 @@ use crate::store::{self, SignIn};
 const BROWSER_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const ACCEPT_POLL: Duration = Duration::from_millis(100);
 const DEFAULT_DEVICE_INTERVAL: u64 = 5;
-/// RFC 8628 §3.5: `slow_down` adds 5 seconds to the polling interval.
 const SLOW_DOWN_STEP: u64 = 5;
 const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
-/// `compliance login`: signs in through Auth, in the browser or with a device code, and stores the sign-in.
 pub fn run(args: LoginArgs) -> Result<(), Failure> {
     let host = config::host();
     let agent = http::agent();
@@ -56,7 +54,6 @@ pub fn run(args: LoginArgs) -> Result<(), Failure> {
     Ok(())
 }
 
-/// The authorization code flow with PKCE through a loopback redirect (RFC 8252). `None` when no browser opens.
 fn browser_sign_in(agent: &Agent, server: &AuthServer) -> Result<Option<SignIn>, Failure> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| {
         Failure::local(
@@ -103,7 +100,6 @@ fn browser_sign_in(agent: &Agent, server: &AuthServer) -> Result<Option<SignIn>,
         .map_err(oauth::OAuthError::into_failure)
 }
 
-/// A desktop with no display cannot show a browser, such as a Linux server reached over SSH.
 fn can_open_browser() -> bool {
     if cfg!(any(target_os = "windows", target_os = "macos")) {
         return true;
@@ -135,10 +131,7 @@ fn wait_for_code(listener: &TcpListener, state: &str) -> Result<String, Failure>
     ))
 }
 
-/// Answers one browser request. `None` keeps waiting: for a request that is not the callback, such as a favicon,
-/// and for a callback without this login's `state`, which did not come from this login's authorize request.
 fn answer_callback(stream: TcpStream, state: &str) -> Option<Result<String, Failure>> {
-    // Ignored: a stream that will not block or time out only risks this one request.
     let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut request_line = String::new();
@@ -193,7 +186,6 @@ fn respond(mut stream: &TcpStream, status: &str, text: &str) {
     let page = format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>Compliance CLI</title></head><body><p>{text}</p></body></html>"
     );
-    // Ignored: the browser may have gone; the terminal carries the outcome.
     let _ = write!(
         stream,
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}",
@@ -233,7 +225,6 @@ struct DeviceAuthorization {
     interval: Option<u64>,
 }
 
-/// The device flow (RFC 8628): shows the code and link on stderr, then polls until the User has answered.
 fn device_sign_in(agent: &Agent, server: &AuthServer) -> Result<SignIn, Failure> {
     let form = server.form(&[("scope", SCOPE)]);
     let body = oauth::post_form(agent, &server.device_authorization_endpoint, &form)?

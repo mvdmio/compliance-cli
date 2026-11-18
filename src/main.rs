@@ -52,7 +52,6 @@ fn main() -> ExitCode {
             }
             (operations, docs_line)
         }
-        // Help and the hand-written commands still work without the description; help says what is missing.
         Err(_) if !generated::names_unknown_command(&handwritten, &[], &args) => (
             Vec::new(),
             format!(
@@ -95,11 +94,9 @@ fn run(cli: Cli) -> Result<(), Failure> {
     }
 }
 
-/// `--help` and `--version` stay plain text; every other parser error is a usage mistake.
 fn parse_failure(error: clap::Error) -> ExitCode {
     match error.kind() {
         ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
-            // Ignored: a closed stdout leaves nothing to report to.
             let _ = error.print();
             ExitCode::SUCCESS
         }

@@ -8,8 +8,6 @@ use crate::oauth;
 use crate::output;
 use crate::store;
 
-/// `compliance logout`: revokes the stored refresh token at Auth, which ends the Agent connection, then forgets
-/// the sign-in. The entry stays when Auth cannot be told, so the User can retry. `COMPLIANCE_TOKEN` is not touched.
 pub fn run() -> Result<(), Failure> {
     let host = config::host();
     if let Some(sign_in) = store::load(&host)? {

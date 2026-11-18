@@ -1,11 +1,8 @@
-//! Reads the operations out of an OpenAPI 3.1 description.
-
 use serde_json::Value;
 use ureq::http::Method;
 
 use crate::response::is_json;
 
-/// A `$ref` chain longer than this is taken as a loop.
 const MAX_REF_DEPTH: usize = 16;
 
 const METHODS: [(&str, Method); 7] = [
@@ -18,7 +15,6 @@ const METHODS: [(&str, Method); 7] = [
     ("patch", Method::PATCH),
 ];
 
-/// One operation, named by its `operationId` `<group>.<action>`, both kebab-cased.
 pub struct Operation {
     pub group: String,
     pub action: String,
@@ -27,11 +23,9 @@ pub struct Operation {
     pub tags: Vec<String>,
     pub summary: Option<String>,
     pub description: Option<String>,
-    /// In the order they appear in `path`.
     pub path_params: Vec<Parameter>,
     pub query_params: Vec<Parameter>,
     pub body: Option<Body>,
-    /// The success response is not JSON, so it goes to `--out`.
     pub download: bool,
 }
 
@@ -50,18 +44,14 @@ pub struct Parameter {
 
 pub struct Body {
     pub required: bool,
-    /// The top-level properties of an object body.
     pub fields: Vec<Parameter>,
 }
 
 pub struct Schema {
     pub kind: Kind,
-    /// Many values of `kind`, one per repeat of the option.
     pub array: bool,
     pub format: Option<String>,
-    /// Allowed values of a string, integer, or number, as typed.
     pub choices: Vec<String>,
-    /// `x-upload-target`, on the schema or on its parameter: the value is an upload id, which `--file` fills.
     pub upload_target: Option<String>,
 }
 
@@ -71,7 +61,6 @@ pub enum Kind {
     Integer,
     Number,
     Boolean,
-    /// An object, a `oneOf`, or a `$ref`: given as JSON text.
     Json,
 }
 
@@ -87,8 +76,6 @@ impl Kind {
     }
 }
 
-/// Every operation with a `<group>.<action>` `operationId`, in document order. A later operation with the same
-/// name as an earlier one is dropped.
 pub fn operations(document: &Value) -> Vec<Operation> {
     let mut operations: Vec<Operation> = Vec::new();
     let Some(paths) = document["paths"].as_object() else {
@@ -160,7 +147,6 @@ fn read_operation(
     })
 }
 
-/// The path item's parameters, overridden by the operation's own with the same name and location.
 fn parameters(document: &Value, item: &Value, operation: &Value) -> Vec<(String, Parameter)> {
     let mut found: Vec<(String, Parameter)> = Vec::new();
     let listed = item["parameters"]
@@ -230,7 +216,6 @@ fn body(document: &Value, request_body: &Value) -> Option<Body> {
     })
 }
 
-/// The body schema with `$ref` followed and a nullable `oneOf` (`null` or one shape) taken as that shape.
 fn body_schema<'a>(document: &'a Value, schema: &'a Value) -> &'a Value {
     let mut schema = schema;
     for _ in 0..MAX_REF_DEPTH {
@@ -298,7 +283,6 @@ fn schema(schema: &Value) -> Schema {
     }
 }
 
-/// `type` as a list, without `null`.
 fn types(schema: &Value) -> Vec<&str> {
     match &schema["type"] {
         Value::String(name) => vec![name.as_str()],
@@ -311,7 +295,6 @@ fn types(schema: &Value) -> Vec<&str> {
     }
 }
 
-/// The first 2xx response has content, and none of it is JSON.
 fn is_download(document: &Value, responses: &Value) -> bool {
     let Some(responses) = responses.as_object() else {
         return false;
@@ -330,7 +313,6 @@ fn is_download(document: &Value, responses: &Value) -> bool {
     !content.is_empty() && !content.keys().any(|media_type| is_json(media_type))
 }
 
-/// Follows a local `$ref` (`#/…`), up to `MAX_REF_DEPTH` hops. An unresolvable one stays as it is.
 fn resolve<'a>(document: &'a Value, value: &'a Value) -> &'a Value {
     let mut value = value;
     for _ in 0..MAX_REF_DEPTH {
@@ -354,8 +336,6 @@ fn text(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-/// `collectedAt` → `collected-at`, `$filter` → `filter`, `URLPath` → `url-path`. Anything but letters and
-/// digits separates words.
 pub fn kebab_case(name: &str) -> String {
     let characters: Vec<char> = name.chars().collect();
     let mut kebab = String::new();

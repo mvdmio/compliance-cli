@@ -5,10 +5,7 @@ use crate::failure::{ErrorCode, Failure};
 use crate::http;
 use crate::oauth::CLIENT_ID;
 
-/// Where Auth answers for one Compliance host, learnt from the host's Protected Resource Metadata (RFC 9728)
-/// and then Auth's own discovery document.
 pub struct AuthServer {
-    /// The REST API resource every token is bound to (RFC 8707).
     pub resource: String,
     pub authorization_endpoint: String,
     pub token_endpoint: String,
@@ -17,7 +14,6 @@ pub struct AuthServer {
 }
 
 impl AuthServer {
-    /// `fields` after the two every request to Auth names: the CLI's client id and the API resource.
     pub fn form<'a>(&'a self, fields: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
         let mut form = vec![
             ("client_id", CLIENT_ID),
