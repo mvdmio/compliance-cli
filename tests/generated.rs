@@ -6,7 +6,7 @@ use std::fs::{self, File};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use operations::{CommandName, live_operations};
+use operations::{CommandName, GLOBAL_OPTIONS, live_operations};
 use serde_json::{Value, json};
 use support::{
     DESCRIPTION_PATH, FakeServer, Recorded, Reply, Run, TOKEN, body_json, compliance_in, fixture,
@@ -686,7 +686,8 @@ fn an_unknown_command_with_a_failed_fetch_does_not_fetch_twice() {
 
 /// The E2E suite predicts the CLI's commands with copies of its naming rules (`tests/e2e/operations.rs`). On the
 /// fixture, and on a few operations that each test one rule, every command they predict is the one the binary
-/// builds: the same names, the same hidden ones, and `--out` on the same downloads.
+/// builds: the same names, the same hidden ones, `--out` on the same downloads, and the same option for every query
+/// parameter and body field, a clash renamed included.
 #[test]
 fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
     let mut document = fixture();
@@ -721,7 +722,32 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
         });
     }
 
-    let mut predicted: Vec<(CommandName, bool)> = Vec::new();
+    // Names that clash: with a global option (`body`, `help`), with an earlier option, and after kebab-casing.
+    document["paths"]["/api/v1/clashes"] = json!({
+        "post": {
+            "operationId": "clashes.send",
+            "parameters": [
+                { "name": "body", "in": "query", "schema": { "type": "string" } },
+                { "name": "title", "in": "query", "schema": { "type": "string" } },
+                { "name": "page", "in": "query", "schema": { "type": "integer" } }
+            ],
+            "requestBody": { "content": { "application/json": { "schema": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "Title": { "type": "string" },
+                    "page": { "type": "integer" },
+                    "help": { "type": "boolean" },
+                    "out": { "type": "string" },
+                    "$filter": { "type": "string" },
+                    "tags": { "type": "array", "items": { "type": "string" } }
+                }
+            } } } },
+            "responses": { "200": { "description": "OK" } }
+        }
+    });
+
+    let mut predicted: Vec<(CommandName, bool, Vec<String>)> = Vec::new();
     let mut hidden = Vec::new();
     for operation in live_operations(&document) {
         let Some(command) = operation.command else {
@@ -729,12 +755,18 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
         };
         if !command.is_generated() {
             hidden.push(command);
-        } else if !predicted.iter().any(|(earlier, _)| *earlier == command) {
-            predicted.push((command, operation.download));
+        } else if !predicted.iter().any(|(earlier, _, _)| *earlier == command) {
+            let options = operation
+                .query
+                .iter()
+                .chain(&operation.body_fields)
+                .map(|parameter| parameter.option.clone())
+                .collect();
+            predicted.push((command, operation.download, options));
         }
     }
     let mut groups: Vec<&str> = Vec::new();
-    for (command, _) in &predicted {
+    for (command, _, _) in &predicted {
         if !groups.contains(&command.group.as_str()) {
             groups.push(&command.group);
         }
@@ -754,9 +786,9 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
         );
 
         let mut expected: Vec<String> = listed_commands(&hand_written.run(&[group, "--help"]));
-        for (command, _) in predicted
+        for (command, _, _) in predicted
             .iter()
-            .filter(|(command, _)| command.group == *group)
+            .filter(|(command, _, _)| command.group == *group)
         {
             expected.push(command.action.clone());
         }
@@ -766,7 +798,7 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
         listed.sort();
         assert_eq!(listed, expected, "compliance {group} --help");
     }
-    for (command, download) in &predicted {
+    for (command, download, options) in &predicted {
         let run = host.run(&[&command.group, &command.action, "--help"]);
         assert_eq!(run.code, 0, "{command} --help: {run:#?}");
         let takes_out = run
@@ -774,6 +806,17 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
             .lines()
             .any(|line| line.trim_start().starts_with("--out "));
         assert_eq!(takes_out, *download, "{command} --help: {}", run.stdout);
+
+        // A hand-written action answers in place of the generated one, with options of its own.
+        let handwritten = listed_commands(&hand_written.run(&[&command.group, "--help"]));
+        if handwritten.contains(&command.action) {
+            continue;
+        }
+        let mut expected = options.clone();
+        expected.sort();
+        let mut listed = listed_options(&run);
+        listed.sort();
+        assert_eq!(listed, expected, "{command} --help: {}", run.stdout);
     }
     for command in &hidden {
         let listed = listed_commands(&host.run(&[&command.group, "--help"]));
@@ -782,6 +825,27 @@ fn the_e2e_naming_rules_name_the_commands_the_cli_builds() {
             "{command} is not hidden: {listed:?}"
         );
     }
+}
+
+/// The options a `--help` lists under `Options:`, without the ones every command has or only some take
+/// (`--help`, `--body`, `--out`, `--file`).
+fn listed_options(run: &Run) -> Vec<String> {
+    run.stdout
+        .lines()
+        .skip_while(|line| line.trim() != "Options:")
+        .skip(1)
+        // An option starts at the margin; the lines of its help are indented further.
+        .filter(|line| line.len() - line.trim_start().len() <= 6)
+        .filter_map(|line| {
+            let line = line.trim_start();
+            let line = line.strip_prefix("-h, ").unwrap_or(line);
+            let long = line.strip_prefix("--")?;
+            long.split(|c: char| c.is_whitespace() || c == '<')
+                .next()
+                .map(str::to_string)
+        })
+        .filter(|name| !GLOBAL_OPTIONS.contains(&name.as_str()))
+        .collect()
 }
 
 /// The command names a `--help` lists under `Commands:`, or none when it fails or lists none.
