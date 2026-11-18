@@ -176,6 +176,25 @@ fn upload_evidence(scenario: &Scenario, name: &str, length: usize) {
 
 #[test]
 #[ignore = "E2E: needs a Test-bed; run with `cargo test --test e2e -- --ignored`"]
+fn server_log() {
+    let scenario = Scenario::start("server log");
+    let test_bed = scenario.test_bed();
+    let Some(path) = &test_bed.server_log else {
+        return;
+    };
+
+    let log = std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("the server log {} is missing: {error}", path.display()));
+
+    assert!(
+        log.contains("Starting Compliance"),
+        "the server log {} does not hold Compliance's startup line",
+        path.display()
+    );
+}
+
+#[test]
+#[ignore = "E2E: needs a Test-bed; run with `cargo test --test e2e -- --ignored`"]
 fn chat_send() {
     let scenario = Scenario::start("chat send");
 

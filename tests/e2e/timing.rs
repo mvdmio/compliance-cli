@@ -19,23 +19,21 @@ fn report() -> &'static Mutex<Report> {
             .expect("a clock after 1970")
             .as_millis();
         Mutex::new(Report {
-            path: target_dir()
-                .join("e2e")
-                .join(format!("run-{started_at}.json")),
+            path: folder().join(format!("run-{started_at}.json")),
             started_at_unix_milliseconds: started_at,
             commands: Vec::new(),
         })
     })
 }
 
-fn target_dir() -> PathBuf {
+pub fn folder() -> PathBuf {
     let binary = Path::new(env!("CARGO_BIN_EXE_compliance"));
     binary
         .ancestors()
         .find(|folder| folder.join("CACHEDIR.TAG").is_file())
         .or_else(|| binary.ancestors().nth(2))
         .expect("the binary sits under the target folder")
-        .to_path_buf()
+        .join("e2e")
 }
 
 pub fn record(scenario: &str, args: &[&str], exit_code: i32, elapsed: Duration) {

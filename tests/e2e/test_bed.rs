@@ -1,6 +1,6 @@
 use std::env;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Instant;
@@ -14,6 +14,7 @@ use crate::timing;
 pub struct TestBed {
     pub url: String,
     pub token: String,
+    pub server_log: Option<PathBuf>,
 }
 
 impl TestBed {
@@ -56,7 +57,11 @@ fn find_or_start() -> Result<Shared, String> {
     let token = env::var("COMPLIANCE_E2E_TOKEN").ok();
     match (url, token) {
         (Some(url), Some(token)) => Ok(Shared {
-            test_bed: TestBed { url, token },
+            test_bed: TestBed {
+                url,
+                token,
+                server_log: None,
+            },
             _launcher: None,
         }),
         (None, None) => start_launcher(),
@@ -69,9 +74,11 @@ fn find_or_start() -> Result<Shared, String> {
 
 fn start_launcher() -> Result<Shared, String> {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/test-bed.sh");
+    let server_log = timing::folder().join("server.log");
     let mut child = Command::new("bash")
         .arg(&script)
         .arg("--until-stdin-closes")
+        .env("TEST_BED_SERVER_LOG", &server_log)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -102,6 +109,7 @@ fn start_launcher() -> Result<Shared, String> {
         test_bed: TestBed {
             url: field("url")?,
             token: field("token")?,
+            server_log: Some(server_log),
         },
         _launcher: Some(Launcher {
             _child: child,

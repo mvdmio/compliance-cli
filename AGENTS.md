@@ -65,7 +65,8 @@ off after 60 days without repository activity; re-enable it in the Actions tab.
   `lookup.rs`: what the Sweeps share, the read command at a path and the Read sweep's lookup of ids;
   `operations.rs`: the operations in the live description and the commands the CLI names them by, copied from
   `src/` and checked against the binary in `tests/generated.rs`; `test_bed.rs`: finding or starting the Test-bed
-  and running the binary on it; `timing.rs`: the timing report under `target/e2e/`).
+  and running the binary on it, and pointing the Launcher's server log at `target/e2e/server.log`; `timing.rs`: the
+  timing report under `target/e2e/`).
 
 ## Test-bed
 
@@ -79,8 +80,14 @@ Docker, the .NET SDK, `bun`, and `curl`, on Linux or macOS.
   two values in `COMPLIANCE_URL` and `COMPLIANCE_TOKEN` to run commands against it. Several can run side by side.
 - `MVDMIO_SUITE_DIR`: the `mvdmio-suite` checkout the Launcher builds, by default `../mvdmio-suite` next to this repo.
   Set it in a worktree, where that default path does not exist.
-- The Launcher sets no `Xai__ApiKey` or `TranslationTools__ApiKey`; put `e2e` in each in its environment, or
-  `conversations send-message` and `chat send` answer 422.
+- The Launcher defaults `TranslationTools__NeutralTextsWithoutApiKey=true`, `Xai__ApiKey=e2e`, and
+  `Xai__BaseUrl=http://127.0.0.1:9` (a port where nothing listens, so no call reaches xAI). A non-empty value in the
+  caller's environment wins. The Launcher sets no `TranslationTools__ApiKey`: Compliance's translation client always
+  calls the production translation service, so any key, a placeholder included, sends the Test-bed's traffic there;
+  the Launcher removes a `TranslationTools__ApiKey` from the caller's environment.
+- `TEST_BED_SERVER_LOG`: the file the Launcher writes Compliance's output to, overwritten at each start and left in
+  place when the Test-bed stops; default `server.log` in the throwaway folder, deleted with it. The E2E suite points it
+  at `target/e2e/server.log` when it starts the Launcher.
 - `TEST_BED_BOOT_TIMEOUT`: the seconds the Launcher allows for the build lock, the build, and the boot together
   (default 1800).
 - `cargo test --test e2e -- --ignored` runs the E2E suite. With `COMPLIANCE_E2E_URL` and `COMPLIANCE_E2E_TOKEN` set

@@ -47,10 +47,10 @@ jobs:
       - run: cargo build
       # The suite starts the Test-bed through scripts/test-bed.sh; Docker is already on the runner.
       - run: cargo test --test e2e -- --ignored
-      - name: Upload the timing report
+      - name: Upload the timing report and server log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-timing
+          name: e2e-report
           path: target/e2e/
           if-no-files-found: warn

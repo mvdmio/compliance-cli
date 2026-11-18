@@ -12,9 +12,21 @@
 #   MVDMIO_SUITE_DIR          the mvdmio-suite checkout (default: ../mvdmio-suite next to this repo)
 #   TEST_BED_BOOT_TIMEOUT     seconds allowed for the build lock, the build, and the boot together
 #                             (default: 1800)
+#   TEST_BED_SERVER_LOG       a file for Compliance's stdout and stderr, overwritten at each start and left in
+#                             place when the Test-bed stops (default: server.log in the Test-bed's own folder,
+#                             deleted with it)
+#   TranslationTools__NeutralTextsWithoutApiKey
+#                             default: true. Never set a TranslationTools__ApiKey here: Compliance's translation
+#                             client always calls the production translation service,
+#                             so the Launcher removes any TranslationTools__ApiKey from the caller's environment
+#   Xai__ApiKey               default: e2e
+#   Xai__BaseUrl              default: http://127.0.0.1:9, where nothing listens, so no call reaches xAI
 #
-# Nothing but the JSON line goes to stdout. Progress goes to stderr; build and server logs go to files in the
-# Test-bed's own folder, and their tail goes to stderr when something fails.
+# A value the caller sets to something non-empty wins over each default.
+#
+# Nothing but the JSON line goes to stdout. Progress goes to stderr; the build log goes to a file in the
+# Test-bed's own folder and the server log there too unless TEST_BED_SERVER_LOG moves it elsewhere; their tail
+# goes to stderr when something fails.
 
 set -euo pipefail
 
@@ -56,6 +68,7 @@ deadline=$((SECONDS + boot_timeout))
 bed_dir="$(mktemp -d "${TMPDIR:-/tmp}/compliance-test-bed.XXXXXXXX")"
 bed_id="$(basename "$bed_dir" | sed 's/^compliance-test-bed\.//' | tr '[:upper:]' '[:lower:]')"
 container="compliance-test-bed-$bed_id"
+server_log="${TEST_BED_SERVER_LOG:-$bed_dir/server.log}"
 server_pid=""
 build_pid=""
 watcher_pid=""
@@ -181,7 +194,7 @@ lock_dir=""
 
 port="$(free_port)" || fail "found no free port"
 url="http://localhost:$port"
-mkdir -p "$bed_dir/data"
+mkdir -p "$bed_dir/data" "$(dirname "$server_log")"
 
 say "starting Compliance at $url"
 (
@@ -196,13 +209,16 @@ say "starting Compliance at $url"
    IdentityServer__BaseUrl="$LOCAL_AUTH_URL" \
    Email__Enabled=false \
    Assistant__UseScriptedModelClient=true \
-   exec dotnet exec "$bed_dir/app/mvdmio.Compliance.Web.dll"
-) </dev/null >"$bed_dir/server.log" 2>&1 &
+   TranslationTools__NeutralTextsWithoutApiKey="${TranslationTools__NeutralTextsWithoutApiKey:-true}" \
+   Xai__ApiKey="${Xai__ApiKey:-e2e}" \
+   Xai__BaseUrl="${Xai__BaseUrl:-http://127.0.0.1:9}" \
+   exec env -u TranslationTools__ApiKey dotnet exec "$bed_dir/app/mvdmio.Compliance.Web.dll"
+) </dev/null >"$server_log" 2>&1 &
 server_pid=$!
 
 until curl --silent --fail --output /dev/null "$url/openapi/v1.json"; do
-   kill -0 "$server_pid" 2>/dev/null || fail "Compliance stopped while starting" "$bed_dir/server.log"
-   ((SECONDS < deadline)) || fail "Compliance did not answer within ${boot_timeout}s" "$bed_dir/server.log"
+   kill -0 "$server_pid" 2>/dev/null || fail "Compliance stopped while starting" "$server_log"
+   ((SECONDS < deadline)) || fail "Compliance did not answer within ${boot_timeout}s" "$server_log"
    sleep 1
 done
 
@@ -238,4 +254,4 @@ wait "$server_pid"
 status=$?
 set -e
 server_pid=""
-fail "Compliance stopped (exit $status)" "$bed_dir/server.log"
+fail "Compliance stopped (exit $status)" "$server_log"
